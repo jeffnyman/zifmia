@@ -1,0 +1,467 @@
+Switches xv5;
+
+Release 2;
+
+! Tetris! If you've ever claimed that the Z-machine is usable only for text
+! adventures, bite your tongue. 
+! This is really astonishingly small; it's less than 3000 bytes if you exclude
+! the introductory text in Main(). It could be dropped into almost any game
+! as an easter egg, and never be noticed. Heh heh heh. 
+! As the Main() routine says, not all interpreters support timed input; if you
+! run this on an interpreter that doesn't, pieces will not fall of their own
+! accord. Everything else should still work, though.
+
+! Notes on inserting Tetris into other games: 
+!
+! I've given all of the identifiers in this code a "tet" prefix
+! (or "Tet", although since Inform ignores capitalization in identifiers, it
+! makes no difference.) 
+!
+! The code uses 8 global variables and almost 1000 bytes of global array
+! space. You may need to increase MAX_STATIC_DATA when compiling if you run
+! short on global array space. If you run out of global variables, you're
+! screwed, since the Z-machine can have only 240 of them. 
+!
+! This source code is in the public domain.
+
+! Changes in release 2:
+!
+! The arrays now use the "Array" syntax of Inform 5.5, so that their addresses
+! are stored in compile-time constants instead of global variables. This saves
+! 20 global variables. It also lets me initialize tetPieceList, instead of 
+! filling it in PlayTetris().
+!
+! All assembly opcodes have @ signs now, which was optional in Inform 5.4, but
+! causes a warning under 5.5.
+!
+! The Pause() function used to call @read_char with timeout arguments set to
+! zero. This did not work on some interpreters (such as Infocom's Mac and Amiga
+! interpreters.) I now leave out the timeout arguments entirely.
+!
+! The timeout function has been updated to reflect new understanding of the
+! Z-machine spec. The basic change is that the timeout delay is in tenths
+! of a second, rather than in seconds. Also, the timeout callback function
+! (TetPauseCallBack) should take zero arguments rather than one (although
+! even in the previous release I was ignoring the argument.)
+
+[ Main;
+	print "^You wake up. You have no memory of who you are, or where you are, \
+	or what you have been doing. A peculiarly vibrating, tinny music pours from \
+	an invisible source. Then you see the tremendous chunk of \
+	stone falling towards you...^^^";
+	
+	Pause();
+	PlayTetris();
+	
+	print "^Okay, so maybe this isn't a serious entry in the interactive-fiction \
+	contest. Please don't give away the joke to anyone else (on Usenet, or \
+	elsewhere.)^^";
+	print "If you find that pieces aren't falling on their own (I mean, if they \
+	only fall when you hit Z or Space) it's not my fault. Not all interpreters \
+	support the timed-input opcodes.^^";
+	print " -- Andrew Plotkin^^[Hit a key to quit.]^^";
+	Pause();
+	quit;
+];
+
+! Note that @read_char is given two arguments, so that no timeout occurs.
+[ Pause dummy;
+	@read_char 1 dummy;
+	return dummy;
+];
+
+Constant tetLines 16;   	! Height of the board.
+Constant tetWidth 12;		! Width of the board.
+Constant tetGridArea 192; 	! Area of the board. Must be equal to (tetLines*tetWidth).
+							!   (Inform has no way to compute a constant, even from other
+							!   constants, so we have to set this manually.)
+Constant tetOffsetX 4;  	! How far the board is from the left margin. Must be >= 2.
+Constant tetNumPieces 7;	! Number of pieces in the catalog.
+Constant tetNumPieces8 56;	! Number of pieces times 8.
+
+! The playing field. A two-dimensional array of bytes, each of which is 0
+! for empty, 1 for full. The values are stored in
+! [y][x] order, where y==0 is the bottom row.
+Array tetGrid -> tetGridArea;
+
+! The piece definitions (I've labelled the pieces S, Z, X, T, I, J, L.)  Mirror-image
+! pieces are listed separately. Each definition is an array of bytes, containing:
+!    The number of squares in the piece (always 4 in Tetris, but the code supports
+!       any number)
+!    A zero byte, for alignment purposes (not that it really matters)
+!    The width and height of the piece
+!    And then the X and Y positions for each square.
+! When pieces rotate, the bottom left corner stays fixed. This means that some of the
+! pieces have extra space around them to make the rotation look right.
+Array tetPS_0 	-> 4 0 2 3   0 0  0 1  1 1  1 2;
+Array tetPS_1 	-> 4 0 3 2   0 1  1 1  1 0  2 0;
+Array tetPZ_0 	-> 4 0 2 3   1 0  1 1  0 1  0 2;
+Array tetPZ_1 	-> 4 0 3 2   0 0  1 0  1 1  2 1;
+Array tetPX		-> 4 0 2 2   0 0  0 1  1 0  1 1;
+Array tetPT_0	-> 4 0 3 3   1 0  1 1  1 2  2 1;
+Array tetPT_1	-> 4 0 3 3   0 1  1 1  2 1  1 0;
+Array tetPT_2	-> 4 0 3 3   1 0  1 1  1 2  0 1;
+Array tetPT_3	-> 4 0 3 3   0 1  1 1  2 1  1 2;
+Array tetPI_0 	-> 4 0 4 4   1 0  1 1  1 2  1 3;
+Array tetPI_1 	-> 4 0 4 4   0 1  1 1  2 1  3 1;
+Array tetPL_0 	-> 4 0 2 3   0 0  0 1  0 2  1 2;
+Array tetPL_1 	-> 4 0 3 2   0 1  1 1  2 1  2 0;
+Array tetPL_2 	-> 4 0 2 3   1 0  1 1  1 2  0 0;
+Array tetPL_3 	-> 4 0 3 2   0 0  1 0  2 0  0 1;
+Array tetPJ_0 	-> 4 0 2 3   1 0  1 1  1 2  0 2;
+Array tetPJ_1 	-> 4 0 3 2   0 0  1 0  2 0  2 1;
+Array tetPJ_2 	-> 4 0 2 3   0 0  0 1  0 2  1 0;
+Array tetPJ_3 	-> 4 0 3 2   0 1  1 1  2 1  0 0;
+
+! The catalog of pieces. For each piece, this array stores four words, representing
+! the byte addresses of the piece definitions in each of its four rotations. (If the
+! piece is symmetrical, some piece definitions will be used more than once, of course.)
+Array tetPieceList --> [ 
+	tetPS_0 tetPS_1 tetPS_0 tetPS_1;
+	tetPT_0 tetPT_1 tetPT_2 tetPT_3;
+	tetPX   tetPX   tetPX   tetPX;
+	tetPZ_0 tetPZ_1 tetPZ_0 tetPZ_1;
+	tetPL_0 tetPL_1 tetPL_2 tetPL_3;
+	tetPI_0 tetPI_1 tetPI_0 tetPI_1;
+	tetPJ_0 tetPJ_1 tetPJ_2 tetPJ_3;
+];
+	
+! Variables which are set up and used internally. 
+Global tetBannerPos;		! Stores the horizontal position of the banner and instructions.
+Global tetPiece;			! The byte address of the current piece
+Global tetPieceCels;		! Number of cels in the current piece
+Global tetPieceWid;			! Width of the current piece
+Global tetPieceHgt;			! Height of the current piece
+Global tetScore;			! Current score
+Global tetBestScore;		! Best score in this session
+Global tetTimedOut;			! A flag used in the timed-input code.
+
+
+! The top-level routine. Call it to play; it's self-contained.
+[ PlayTetris ix;
+	ix = tetLines+1;
+	@erase_window $ffff; @split_window ix; @set_window 1; 
+	
+	tetBestScore = 0;
+	
+	tetBannerPos = (0->33) / 2;
+	TetBanner();
+		
+	do {
+		TetInit();
+		ix = TetGameLoop();
+		if (tetScore > tetBestScore)
+			tetBestScore = tetScore;
+	} until (ix ~= 0);
+	
+	style roman; @set_cursor 1 1; @split_window 0; @erase_window $ffff; @set_window 0;
+];
+
+[ TetBanner ix jx kx;
+	style reverse;
+	for (ix=1: ix<=7: ix++) {
+		@set_cursor ix tetBannerPos;
+		spaces 19;
+	}
+	@set_cursor 1 tetBannerPos;
+	print "    T E T R I S";
+	@set_cursor 2 tetBannerPos;
+	print "An, uh, Interactive";
+	@set_cursor 3 tetBannerPos;
+	print "   Demonstration";
+	@set_cursor 4 tetBannerPos;
+	print " by Andrew Plotkin";
+	@set_cursor 5 tetBannerPos;
+	print "     Release ", (0-->1) & $03ff;
+	@set_cursor 6 tetBannerPos;
+	print "   Serial ";
+	for (ix=18:ix<24:ix++) print_char 0->ix;
+	@set_cursor 7 tetBannerPos;
+	print "   Inform  v"; inversion;	
+	style roman;
+	
+	@set_cursor 9 tetBannerPos;
+	print "A : move left";	
+	@set_cursor 10 tetBannerPos;
+	print "D : move right";	
+	@set_cursor 11 tetBannerPos;
+	print "Z : move down one";	
+	@set_cursor 12 tetBannerPos;
+	print "S : rotate";	
+	@set_cursor 13 tetBannerPos;
+	print "Space : drop";	
+
+	@set_cursor 15 tetBannerPos;
+	print "  Score:";	
+
+	kx = tetOffsetX-1;
+	jx = (tetOffsetX+tetWidth);
+	for (ix=1: ix<=tetLines: ix++) {
+		@set_cursor ix kx;
+		print "(";
+		@set_cursor ix jx;
+		print ")";
+	}
+	ix = tetOffsetX-1;
+	jx = (tetLines+1);
+	@set_cursor jx ix;
+	for (ix=1: ix<=(tetWidth+2): ix++) {
+		print "-";
+	}
+];
+
+! Initialize a single game.
+[ TetInit ix;
+	for (ix=1: ix<=tetLines: ix++) {
+		@set_cursor ix tetOffsetX;
+		spaces tetWidth;
+	}
+	for (ix=0: ix<tetGridArea: ix++) {
+		tetGrid->ix = 0;
+	}
+	@set_cursor 16 tetBannerPos;
+	print "   Best: ", tetBestScore;
+		
+	TetSetScore(0);
+];
+
+! Play a single game, and return when it's over. Return 1 if we want to quit,
+!   and 0 if we want to play again.
+[ TetGameLoop 
+	piececlass
+	posx posy rot 
+	piecelive dropping
+	kx ix;
+	
+	while (1==1) {
+		! create a new piece
+		piececlass = (random(tetNumPieces) - 1) * 4;
+		rot = 0;
+		tetPiece = tetPieceList-->(piececlass+rot);
+		tetPieceCels = tetPiece->0;
+		tetPieceWid = tetPiece->2;
+		tetPieceHgt = tetPiece->3;
+		posx = tetWidth/2 - tetPieceWid/2;
+		posy = tetLines;
+		
+		while (posy > tetLines - tetPieceHgt) {
+			posy--;
+			if (TetTestPosition(posx, posy) ~= 0) {
+				! The new piece doesn't fit on the screen. We lose.
+				return 0;
+			}
+		}
+		
+		piecelive = 1;
+		dropping = 0;
+		while (piecelive ~= 0) {
+		
+			TetDrawPosition(posx, posy, '#');
+			
+			if (dropping==0) {
+				kx = TetPause();
+			}
+			else {
+				kx = 'z';
+			}
+				
+			if (kx=='q' || kx=='Q')
+				return 1;
+			if (kx==' ') {
+				dropping = 1;
+				kx = 'z';
+			}
+			if (kx=='a') {
+				if (TetTestPosition(posx-1, posy) == 0) {
+					TetDrawPosition(posx, posy, ' ');
+					posx--;
+				}
+			}
+			if (kx=='d') {
+				if (TetTestPosition(posx+1, posy) == 0) {
+					TetDrawPosition(posx, posy, ' ');
+					posx++;
+				}
+			}
+			if (kx=='s') {
+				ix = (rot+1) % 4;
+				ix = tetPieceList-->(piececlass+ix);
+				if (TetTestPosition(posx, posy, ix) == 0) {
+					TetDrawPosition(posx, posy, ' ');
+					rot = (rot+3) % 4;
+					tetPiece = tetPieceList-->(piececlass+rot);
+				}
+			}
+			if (kx=='z' || kx==0) {
+				if (TetTestPosition(posx, posy-1) == 0) {
+					! Move it down
+					TetDrawPosition(posx, posy, ' ');
+					posy--;
+				}
+				else {
+					! The piece has hit bottom, or an obstacle.
+					TetDrawPosition(posx, posy, 'O');
+					TetStorePosition(posx, posy);
+					TetEliminateRows();
+					piecelive = 0;
+				}
+			}
+		}
+	}
+];
+
+! Check if the piece fits on the screen. Return 0 if it does, 1 if not.
+!   It's ok if it's above the top, but not if it's off the left or right 
+!   edge, or below the bottom.
+[ TetTestPosition posx posy curpiece
+	ix jx cx curpiececels;
+	
+	if (curpiece==0)
+		curpiece = tetPiece;
+	curpiececels = curpiece->0;
+	
+	for (cx=0 : cx<curpiececels : cx++) {
+		ix = posx + curpiece->(cx*2+4);
+		jx = posy + curpiece->(cx*2+5);
+		if (ix < 0 || ix >= tetWidth)
+			return 1;
+		if (jx < 0)
+			return 1;
+		if (jx < tetLines && tetGrid->(jx*tetWidth+ix) ~= 0)
+			return 1;
+	}
+	
+	return 0;
+];
+
+! Draw the current piece at the given position, with the given character.
+[ TetDrawPosition posx posy symbol
+	ix jx cx;
+	
+	for (cx=0 : cx<tetPieceCels : cx++) {
+		ix = tetOffsetX + (posx + tetPiece->(cx*2+4));
+		jx = (tetLines) - (posy + tetPiece->(cx*2+5));
+		@set_cursor jx ix;
+		print char symbol;
+	}
+];
+
+! Store the current piece on the board (making it permanent.) 
+[ TetStorePosition posx posy
+	ix jx cx;
+	
+	for (cx=0 : cx<tetPieceCels : cx++) {
+		ix = (posx + tetPiece->(cx*2+4));
+		jx = (posy + tetPiece->(cx*2+5));
+		tetGrid->(jx*tetWidth+ix) = 1;
+	}
+];
+
+! Look for completed rows, and eliminate them.
+[ TetEliminateRows
+	ix jx kx px px2 rowfull dist;
+
+	for (jx=0 : jx<tetLines : jx++) {
+		px = tetGrid + jx*tetWidth;
+		rowfull = 1;
+		for (ix=0 : (rowfull ~= 0 && ix < tetWidth) : ix++) {
+			if (px->ix == 0)
+				rowfull = 0;
+		}
+		if (rowfull ~= 0)
+			break;
+	}	
+	
+	if (jx==tetLines)
+		return;
+		
+	! Now we get to move the upper reaches down.
+	dist = 1;
+	
+	while (jx+dist < tetLines) {
+		px = tetGrid + (jx)*tetWidth;
+		px2 = tetGrid + (jx+dist)*tetWidth;
+		rowfull = 1;
+		kx = (tetLines) - jx;
+		@set_cursor kx tetOffsetX;
+		for (ix=0 : (ix<tetWidth) : ix++) {
+			if (px2->ix == 0) {
+				rowfull = 0;
+				px->ix = 0;
+				print " ";
+			}
+			else {
+				px->ix = 1;
+				print "O";
+			}
+		}
+		if (rowfull == 0) {
+			jx++;
+		}
+		else {
+			dist++;
+		}
+	}
+	
+	while (jx < tetLines) {
+		kx = (tetLines) - jx;
+		@set_cursor kx tetOffsetX;
+		spaces tetWidth;
+		for (ix=0 : (ix<tetWidth) : ix++) {
+			px->ix = 0;
+		}
+		jx++;
+	}
+
+	TetSetScore(tetScore+(dist*dist));
+];
+
+! Set the score and display the new value
+[ TetSetScore newscore
+	ix;
+	
+	tetScore = newscore;
+	
+	ix = tetBannerPos + 9;
+	@set_cursor 15 ix;
+	print tetScore;
+	if (tetScore == 0)
+		print "    ";
+];
+
+! Pause 1 second and see if a key is pressed. If so, the key value is
+! returned; otherwise 0 is returned. The cursor is moved out of the
+! way, since some interpreters show its position. Also, one space is 
+! printed. This is basically superstition; I stuck it in while trying to
+! find a horrific crash, and eventually the crash went away. I never
+! figured out if the space was what fixed the problem, but now I'm afraid
+! to get rid of it.
+! I am told that @read_char does not necessarily return any particular
+! value (in dummy) if a time-out occurs. (The ZIP interpreters return
+! zero, but I don't want to rely on that.) So I use tetTimedOut as a
+! flag; the timeout routine sets it to 1, and if that occurs, TetPause
+! makes sure to return zero.
+[ TetPause dummy;
+	dummy = (tetOffsetX+tetWidth+1);
+	@set_cursor 1 dummy;
+	spaces 1;
+	tetTimedOut = 0;
+	@read_char 1 3 #r$TetPauseCallBack dummy;
+	if (tetTimedOut == 1) {
+		dummy = 0;
+	}
+	return dummy;
+];
+
+! The callback routine for read_char. It always returns true, so that the
+! character input always terminates when the time limit is up. 
+! Note that older Z-machine specifications say that this routine is called
+! with one argument (the length of the timeout period, as given to @read_char).
+! This is now known to be false; correct interpreters will call this with
+! no arguments. (Incorrect interpreters which call it with one argument are
+! safe, however, because extra arguments to a function are always ignored.)
+[ TetPauseCallBack;
+	tetTimedOut = 1;
+	rtrue;
+];
+

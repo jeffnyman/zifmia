@@ -1,0 +1,9 @@
+[ Main   win;
+  @setiosys 2 0; ! select Glk I/O system
+
+  ! Open a text-buffer window, and select it as the current output stream.
+  win = glk($0023, 0, 0, 0, 3, 0); ! glk_window_open
+  glk($002F, win); ! glk_set_window
+
+  print "Testing Glulx^";
+];

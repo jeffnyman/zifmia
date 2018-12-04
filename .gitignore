@@ -1,0 +1,15 @@
+# OS Files
+
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+$RECYCLE.BIN/
+Desktop.ini
+*.tmp
+*.bak
+*.swp
+*~.nib

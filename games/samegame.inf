@@ -1,0 +1,541 @@
+! SAMEGAME
+!
+! Z-Machine version © 1998 Kevin Bracey (kbracey@acorn.co.uk)
+!
+! To compile this program, you'll need Inform 6.15 or later. However
+! Inform 6.15 doesn't know the Unicode opcodes. Substitute
+! @"EXT:11" for @print_unicode and @"EXT:12S" for @check_unicode
+! to get around this. (I've modified my copy of Inform).
+!
+! Also, as the game uses the mouse you _must_ set bit 5 of byte $11 of
+! the story file manually after compilation. Inform won't do this for
+! us :(
+!
+! Anyone looking at this source file for inspiration probably needs
+! their head examined.
+!
+
+Zcharacter table '©' 'ö';
+
+Abbreviate ". " ", " " interpreter" "SameGame" ".^^" " version" " an" " your"
+           "the" "Standard" " tha" "ing" " to" " mo" " ball" "ame" "int" "all"
+           "'s " "ion" "oved" "se " "re " "ine " "rem" "abl" "ode" "ach" "or "
+           "igh" "ou " "nd " "not " "nte" "ress" "lea" " it" "ect" "cor" " on"
+           " of" " is" "t s";
+
+Global standard_interpreter;
+Global screen_width;
+Global screen_height;
+Global char_width;
+Global char_height;
+Global colour_available;
+Global timed_available;
+Global plot_type;
+Global xoffset;
+Global yoffset;
+Global curx;
+Global cury;
+Global score;
+
+Array charlist -> ' ' 'O' 'X' 'I';
+Array collist -> 9 6 3 4;
+Constant ZSCII_BLOB 'O';
+Constant FONT3_BLOB $5F;
+Constant UNICODE_BLOB $25CF;
+
+Array grid -> (24*10);
+Array remstack -> (24*10);
+
+Array highscore -> (12*5);
+Array highscore_name string "SAMEGAME.HGH";
+
+[ Main x;
+
+  standard_interpreter=$32-->0;
+  
+  print "^^^";
+  style bold;
+  print "SAMEGAME";
+  style roman;
+  print "^Another episode in the Z-Machine abuse saga^
+         Release ", (0-->1) & $03ff, " / Serial number ";
+  for (x=18:x<24:x++) print (char) 0->x;
+  print " / Inform v"; inversion;
+  if (standard_interpreter > 0) {
+    print "^Standard interpreter ";
+    @log_shift standard_interpreter $FFF8 -> x;
+    print x;
+    print ".", standard_interpreter & $FF;
+  }
+    
+  print "^^Z-Machine version © 1998 Kevin Bracey (kbracey@@64acorn.co.uk)^^";
+  
+  CheckSettings();
+  
+  print "Use cursor keys or the mouse to select a ball.^
+         Remove that ball and its matching neighbours by pressing Enter.^
+         Balls can only be removed if two or more neighbours match.^
+         The more balls that are removed each turn, the higher the score.^
+         A bonus of 500 points is awarded if all balls are removed.^^
+         [Press any key to begin]";
+  
+  @read_char 1 -> x;
+  
+  @restore highscore 60 highscore_name -> x;
+  if (x < 12 * 5) {
+    for (x=0: x<12: x++) {
+      highscore->(x*5) = 'K';
+      highscore->(x*5+1) = 'J';
+      highscore->(x*5+2) = 'B';
+      (highscore + x*5+3)-->0 = 3000-x*250;
+    }
+  }
+  
+  for (::) {
+    NewGame();
+    PlayGame();
+  }
+];
+
+[ CheckSettings a discard;
+  char_width=$26->0;
+  char_height=$27->0;
+  screen_width=$22-->0 / char_width;
+  screen_height=$24-->0 / char_height;
+  colour_available=$01->0 & 1;
+  timed_available=$01->0 & 128;
+  
+  if (screen_width < 46 || screen_height < 14) {
+    print "Sorry, SameGame needs a screen size of at least 46x14.^";
+    quit;
+  }
+  
+  if (standard_interpreter == 0)
+    print "You are using an interpreter that does not obey the
+             Z-Machine Standards Document. SameGame is not guaranteed to
+             work on such an interpreter, so please don't send me any bug
+             reports.^^";
+  
+  xoffset = (screen_width - 40)/2 + 1;
+  yoffset = (screen_height - 10)/2 + 1;
+  
+  if (colour_available) {
+    if (standard_interpreter >= $0100)
+      @check_unicode $257F -> a;
+
+    if (a & 1)
+      plot_type = 4;
+    else {
+      if (standard_interpreter >= $0020) {
+        @set_font 3 -> a;
+        @set_font 1 -> discard;
+      }
+      
+      if (a == 0)
+        plot_type = 2;
+      else
+        plot_type = 3;      
+    }
+  }
+  else
+    plot_type = 1;
+];
+
+Array nonfont3 -> "+------------------------+------------+\
+                   |                        |            |\
+                   +------------------------+            |\
+                   |                        |            |\
+                   |                        |            |\
+                   |                        |            |\
+                   |                        |            |\
+                   |                        |            |\
+                   |                        |            |\
+                   |                        |            |\
+                   |                        |            |\
+                   |                        |            |\
+                   |                        |            |\
+                   +------------------------+------------+";
+
+Array font3 ->    "HLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL\
+                   N                        M            N\
+                   NLLLLLLLLLLLLLLLLLLLLLLLLM            N\
+                   N                        M            N\
+                   N                        M            N\
+                   N                        M            N\
+                   N                        M            N\
+                   N                        M            N\
+                   N                        M            N\
+                   N                        M            N\
+                   N                        M            N\
+                   N                        M            N\
+                   N                        M            N\
+                   GKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKK";
+
+
+[ NewGame i x y;
+  @set_colour 2 9;
+  @erase_window -1;
+
+  @split_window screen_height;
+  @buffer_mode 0;
+  @set_window 1;
+  
+  for (i=0: i<240: i++) {
+    grid->i=random(3);
+  }
+  curx = 11; cury = 5;
+  score = 0;
+  x = xoffset - 1; y = yoffset - 3;
+  @set_colour 2 9;
+  @set_font 3 -> i;
+  @set_cursor y x;
+  if (i == 0)
+    @print_table nonfont3 39 14;
+  else {    
+    @print_table font3 39 14;
+    @set_font 1 -> i;
+  }
+  x = xoffset + 1; y = yoffset - 2;
+  @set_cursor y x;
+  print "Score:";
+  DrawHighScores();
+  x = xoffset + 39; y = yoffset - 1;
+  @set_cursor y x;
+  style bold; print (char) 'Q'; style roman; print " Quit";
+  y = y + 2;
+  @set_cursor y x;
+  style bold; print (char) 'N'; style roman; print " New";
+  y = y + 1;
+  @set_cursor y x;
+  print "  game";
+  y = y + 2;
+  @set_cursor y x;
+  style bold; print (char) '1'; style roman; print " Disp";
+  y = y + 1;
+  @set_cursor y x;
+  style bold; print (char) '2'; style roman; print " mode";
+  y = y + 1;
+  @set_cursor y x;
+  style bold; print (char) '3';
+  y = y + 1;
+  @set_cursor y x;
+  print (char) '4'; style roman;
+  RedrawBoard();
+];
+
+[ DrawHighScores x y i s;
+  x = xoffset + 24 + 1;
+  y = yoffset - 2;
+  @set_colour 2 9;
+  for (i=0: i<12: i++) {
+    s = y + i;
+    @set_cursor s x;
+    if (i < 9)
+      print (char) ' ';
+    print i+1, " ", (char) highscore->(i*5), (char) highscore->(i*5+1),
+                    (char) highscore->(i*5+2), " ";
+    s = (highscore+i*5+3)-->0;
+    if (s < 10000) print (char) ' ';
+    if (s < 1000)  print (char) ' ';
+    if (s < 100)   print (char) ' ';
+    if (s < 10)    print (char) ' ';
+    print s;
+  }
+];
+
+[ RedrawBoard x y tmp;
+  for (y=0: y<10: y++) {
+    tmp = y+yoffset;
+    @set_cursor tmp xoffset;
+    for (x=0: x<24: x++) {
+      PlotBlob(x, y);
+    }
+  }
+  
+  x = xoffset + 8; y = yoffset - 2;
+  @set_cursor y x;
+  @set_colour 2 9;
+  print score;
+];
+
+[ PlotBlob x y move highlight c bg col tmp1 tmp2;
+  if (move) {
+    tmp1 = y+yoffset; tmp2 = x+xoffset;
+    @set_cursor tmp1 tmp2;
+  }
+  c=grid->(y*24+x);
+  col=collist->c;
+  
+  if (highlight)
+    bg=2;
+  else
+    bg=9;
+
+  switch (plot_type) {
+    1: if (highlight)
+         style reverse;
+       print (char) charlist->c;
+       if (highlight)
+         style roman;
+    2: if (highlight) bg=5; else bg=9;
+       @set_colour col bg;
+       if (c == 0)
+         print (char) ' ';
+       else
+         print (char) ZSCII_BLOB;
+    3: if (highlight) bg=2; else bg=9;
+       @set_colour bg col;
+       @set_font 3 -> move;
+       print (char) FONT3_BLOB;
+       @set_font 1 -> move;
+    4: @set_colour col bg;
+       @print_unicode UNICODE_BLOB;
+  }
+];
+
+[ PlayGame ch tmp1 tmp2 x y mouse;
+  for (::) {
+    PlotBlob(curx, cury, 1, 1);
+    tmp1 = cury+yoffset; tmp2 = curx+xoffset;
+    @set_cursor tmp1 tmp2;      
+    @read_char 1 -> ch;
+    PlotBlob(curx, cury, 1);
+    
+    switch (ch) {
+      10, 13, 32: if (RemoveBlobs(curx, cury)) rtrue;
+      'q', 'Q': Quit();
+      'n', 'N': rtrue;
+      '1' to '4': if (plot_type > 1) @set_colour 2 9;
+                  plot_type = ch - '0'; RedrawBoard();
+      129, 'k', 'K': if (cury > 0) cury--;
+      130, 'j', 'J': if (cury < 9) cury++;
+      131, 'h', 'H': if (curx > 0) curx--;
+      132, 'l', 'L': if (curx < 23) curx++;
+      254: mouse = $36-->0;
+           x = (mouse-->1 - 1)/char_width + 1 - xoffset;
+           y = (mouse-->2 - 1)/char_height + 1 - yoffset;
+           if (x >= 0 && x < 24 && y >= 0 && y < 10) {
+             curx = x; cury = y;
+             if (RemoveBlobs(curx, cury)) rtrue;
+           }
+    }
+  }
+];
+
+[ Quit tmp;
+  @set_colour 1 1;
+  @set_font 1 -> tmp;
+  @erase_window -1;
+  @buffer_mode 1;
+
+  print "^^Thank you for playing ";
+  style bold;
+  print "SameGame";
+  style roman;
+  print "!^^
+         My inspiration came from Andrew Plotkin's ";
+  style underline;
+  print "Freefall";
+  style roman;
+  print " and Torbjörn Andersson's ";
+  style underline; print "Robots"; style roman;
+  print ".^^";
+  style underline; print "SameGame"; style roman;
+  print " is not my idea - I first saw it as Jon Read's version
+         for the Psion Series 3a and Acorn PocketBook II, although it's
+         been around much longer than that. You can get his version
+         from
+         http://www.ecs.soton.ac.uk/@@126jnr95r/psion/samegame.html.^
+         ^";
+  style underline; print "SameGame"; style roman;
+  print " is an extreme stress test of your interpreter's Standard
+         compliance; it uses file access, the mouse, font 3, colour,
+         the Unicode extension table and ";
+  font off; print "print_unicode"; font on;
+  print ", together with the rare opcodes ";
+  font off; print "print_table"; font on;
+  print " and ";
+  font off; print "log_shift"; font on;
+  print ", just to check your interpreter author is awake.^^
+         It should run okay on an interpreter conforming to
+         version 0.2 of the Standard (except it will probably crash if you
+         manually select
+         display mode 4), and perfectly on an interpreter conforming to version
+         1.0.^^";
+
+  @save highscore 60 highscore_name -> tmp;
+  
+  if (tmp == 0)
+    print "I'm afraid I was unable to save your high-score table. Perhaps your
+           interpreter doesn't support file access.^^";
+  
+  print "Kevin Bracey, 1998^^
+         [Press any key to quit]";
+  
+  @read_char 1 -> tmp;
+  
+  new_line;
+  
+  quit;
+];
+
+[ Neighbours x y c n;
+  if (y > 0 && grid->((y-1)*24+x) == c) n++;
+  if (y < 9 && grid->((y+1)*24+x) == c) n++;
+  if (x > 0 && grid->(y*24+(x-1)) == c) n++;
+  if (x < 23 && grid->(y*24+(x+1)) == c) n++;
+  return n;
+];
+
+[ NextNeighbour g c x y;
+  x = g % 24;
+  y = g / 24;
+  if (x < 23 && grid->(g+1) == c) return g+1;
+  if (y < 9 && grid->(g+24) == c) return g+24;
+  if (x > 0 && grid->(g-1) == c) return g-1;
+  if (y > 0 && grid->(g-24) == c) return g-24;
+  return -1;
+];
+  
+Array newinit -> 3;
+
+[ RemoveBlobs x y c g d s;
+  g=y*24+x;
+  c=grid->g;
+  if (c==0) rfalse;
+  if (Neighbours(x, y, c) == 0) rfalse;
+  
+  grid->g=0;
+  PlotBlob(x, y, 1);
+  remstack->0=g;
+  d=0; s=1;
+  
+  while (d>=0) {
+    g = NextNeighbour(g, c);
+    if (g == -1) {
+       if (--d < 0)
+           break;
+       g = remstack->d;
+    }
+    else {
+      grid->g = 0;
+      remstack->(++d) = g;
+      PlotBlob(g % 24, g / 24, 1);
+      s++;
+    }
+  }
+  
+  score = score + s * (s+1) / 2;
+  
+  ! Drop the pieces
+  for (y=9: y>0: y--)
+    for (x=0: x<24: x++) {
+      if (grid->(y*24+x) == 0) {
+        for (s=y-1: s>=0: s--) {
+          if (grid->(s*24+x) ~= 0) {
+            grid->(y*24+x) = grid->(s*24+x);
+            grid->(s*24+x) = 0;
+            break;
+          }
+        }
+      }
+    }
+  
+  ! Remove empty columns
+  for (x=23: x>0: x--)
+    if (grid->(9*24+x) ~= 0 && grid->(9*24+(x-1)) == 0) {
+      for (s=x: s<24: s++) {
+        for (y=0: y<10: y++) {
+          grid->(y*24+(s-1)) = grid->(y*24+s);
+          if (s == 23)
+            grid->(y*24+23) = 0;
+        }
+      }
+    }
+    
+  RedrawBoard();
+  
+  ! Check if the game's over
+  if (grid->(9*24+0) == 0) {
+    score = score + 500;
+    x = xoffset + 8; y = yoffset - 2;
+    @set_cursor y x;
+    @set_colour 2 9;
+    print score;
+    x = xoffset + 7; y = yoffset + 8;
+    @set_cursor y x;
+    style bold;
+    print " 500 bonus ";
+    style roman;
+  }
+  else {
+    for (x=0: x<24: x++) {
+      for (y=9: y>=0: y--) {
+        c = grid->(y*24+x);
+        if (c ~= 0 && Neighbours(x, y, c) > 0)
+          rfalse;
+      }
+    }
+  }
+  
+  @set_colour 2 9;
+  @set_font 1 -> x;
+  x = xoffset + 7;
+  y = yoffset + 4;
+  s = (highscore+5*11+3)-->0;
+  if (score > s)
+    y = y - 2;
+  @set_cursor y x;
+  style bold;
+  print " GAME OVER ";
+  style roman;
+  
+  if (score > s) {
+    x = x - 4;
+    y = y + 2;
+    @set_cursor y x;
+    print "Please enter your";
+    y = y + 1;
+    @set_cursor y x;
+    print "initials:        "; 
+    x = x + 10;
+    s = 0;
+    newinit->0 = ' ';
+    newinit->1 = ' ';
+    newinit->2 = ' ';
+    do {
+      g = x + s;
+      @set_cursor y g;
+      @read_char 1 -> g;
+      switch (g) {
+        10,13: break;
+        8,127: if (s > 0) {
+                 newinit->(--s) = ' ';
+                 g = x + s;
+                 @set_cursor y g;
+                 print (char) ' ';
+               }
+        32 to 126, 155 to 251:
+               if (s < 3) {
+                 print (char) g;
+                 newinit->(s++) = g;
+               }
+      }
+    } until (g == 10 or 13);
+    for (x=11: x >= 0 && score > (highscore+5*x+3)-->0: x--) {
+      if (x<11) {
+        for (y=0: y<5: y++) {
+          highscore->(5*(x+1)+y) = highscore->(5*x+y);
+        }
+      }
+    }
+    highscore->(5*(x+1)) = newinit->0;
+    highscore->(5*(x+1)+1) = newinit->1;
+    highscore->(5*(x+1)+2) = newinit->2;
+    (highscore+5*(x+1)+3)-->0 = score;
+  }
+  else
+    @read_char 1 -> x;
+];
+
+

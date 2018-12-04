@@ -1,0 +1,300 @@
+! ---------------------------------------------------------------------------
+!                                   Z-LIFE
+!                 by Julian Arnold <jools@arnod.demon.co.uk>
+!             This program has been placed in the Public Domain.
+! ---------------------------------------------------------------------------
+
+! ---------------------------------------------------------------------------
+! ** Release History
+!    1/960117: (See below).
+!    2/960118: (See below).
+!    3/960121: It's all changed. Previous releases were WRONG. Apart from
+!              making it work properly then, the main addition is the
+!              optional colour support (Z-Cells lighten as they age until,
+!              after seven generations, they die of old age).
+! ---------------------------------------------------------------------------
+
+! ---------------------------------------------------------------------------
+! ** To Do
+!    Add mouse support (when I've figured out how).
+! ---------------------------------------------------------------------------
+
+#SWITCHES sv5x;
+
+#RELEASE 3;
+#SERIAL  "960121";
+
+#CONSTANT DENSITY 15;  ! Percentage chance of Z-Cell being filled
+#CONSTANT EMPTY   ' '; ! Character for empty cell
+#CONSTANT CELL    '*'; ! Character for filled cell
+
+#GLOBAL oldcomm    -> 1474;
+#GLOBAL newcomm    -> 1474;
+#GLOBAL generation =  1;
+#GLOBAL usecolour  =  0;
+
+[ Main;
+
+    Initialise();
+
+    Borders();
+
+    RandomizeCommunity();
+
+    for (::)
+    {
+        CheckKeypress();
+
+        NewGeneration();
+    }
+
+];
+
+[ Initialise  pkey;
+
+    if (0->33 < 80 || 0->32 < 24)
+    {
+        print "[You must have a screen width of 80 characters and a screen \
+            height of 24 lines to run ~Z-Life~.]^^[Any key to quit]";
+        @read_char 1 pkey;
+        quit;
+    }
+
+    box "~Cellular Automata, of which Life is an example, were"
+        " suggested by Stanislaw Ulam in the 1940s, and first"
+        " formalized by von Neumann. Conway's 'Game of Life'"
+        " was popularized in Martin Gardner's mathematical"
+        " games column in the October 1970 and February 1971"
+        " issues of Scientific American.~"
+        ""
+        "    -- Mark Kantrowitz, ~Answers to Frequently Asked"
+        "       Questions about Artificial Intelligence~,"
+        "       comp.ai, January, 1996,"
+        "       ftp.cs.cmu.edu:/user/ai/pubs/faqs/ai/ai_?.faq,"
+        "       mkant+ai-faq@@64cs.cmu.edu";
+
+    print "[Any key]";
+    @read_char 1 pkey;
+    @erase_window -1;
+
+    style bold; print "^^^Z-LIFE"; style roman;
+    print "^A not-very interactive journey into ~AI~ (honest :)^by Julian \
+        Arnold <jools@@64arnod.demon.co.uk>^This program has been placed in \
+        the Public Domain.^^";
+
+    print "~Z-Life~ was written using Graham Nelson's Inform compiler (5.5, \
+        v1503) and tested mainly on Kevin Bracey's Acorn Z-Machine \
+        interpreter, Zip 2000 (v1.15).^^";
+
+    if (50-->0 == 0)
+        print "[Your interpreter is not Standard. Certain features of \
+            ~Z-Life~ may not work properly.]^^";
+
+    if (0->1 & 128 == 0)
+        print "[Your interpreter does not support timed-input. You'll have \
+            to press SPACE to proceed to the next generation.]^^";
+
+    if (0->1 & 1 ~= 0)
+    {
+        print "Do you want to represent age by colour (dark -> light)? \
+            (Y/N) >";
+        do
+        {
+            @read_char 1 pkey;
+            if (pkey ~= 'y' or 'n') @sound_effect 1;
+        } until (pkey == 'y' or 'n');
+        if (pkey == 'y') { usecolour = 1; print "YES"; }
+        else             { usecolour = 0; print "NO"; }
+    }
+    else
+        print "[Your interpreter can't display colours (so no age-by-colour \
+            I'm afraid).]";
+
+    print "^^[Any key]";
+    @read_char 1 pkey;
+    @erase_window -1;
+
+    @split_window 24;
+    @set_window 1;
+    @buffer_mode 0;
+    font off;
+
+];
+
+[ Borders  i;
+
+    @set_cursor 1  2;
+    for (i = 1: i <= 78:i++) print "-";
+    @set_cursor 24 2;
+    for (i = 1: i <= 78:i++) print "-";
+
+    for (i = 2: i <= 23: i++)
+    {
+        @set_cursor i 1;  print "|";
+        @set_cursor i 69; print "|";
+        @set_cursor i 80; print "|";
+    }
+
+    @set_cursor 1  1;  print "+";
+    @set_cursor 1  69; print "+";
+    @set_cursor 1  80; print "+";
+    @set_cursor 24 1;  print "+";
+    @set_cursor 24 69; print "+";
+    @set_cursor 24 80; print "+";
+
+    @set_cursor 2  70; print "GENERATION";
+    style bold;
+    @set_cursor 5  72; print "Z-LIFE";
+    style roman;
+    @set_cursor 7  71; print (0-->1) & $03ff, "/";
+    for (i = 18: i < 24: i++) print (char) 0->i;
+    @set_cursor 9  70; print "Programmed";
+    @set_cursor 10 74; print "by";
+    @set_cursor 11 71; print "J Arnold";
+    @set_cursor 13 73; print "with";
+    @set_cursor 14 70; print "Inform 5.5";
+    @set_cursor 16 72; print "PUBLIC";
+    @set_cursor 17 72; print "DOMAIN";
+    @set_cursor 19 73; print "1996";
+    @set_cursor 22 70; print "(N)ew game";
+    @set_cursor 23 72; print "(Q)uit";
+
+];
+
+[ RandomizeCommunity  x y c;
+
+    for (y = 1: y <= 22: y++)
+        for (x = 1: x <= 67: x++)
+        {
+            c = CalcLoc(x, y);
+
+            if (random(100) <= DENSITY) oldcomm->c = 1;
+            else                        oldcomm->c = 0;
+        }
+
+];
+
+[ CheckKeypress  pkey;
+
+    @read_char 1 1 #r$NewGeneration pkey;
+
+    switch (pkey)
+    {
+        'q': quit;
+        'n': @restart;
+    }
+
+];
+
+[ NewGeneration  n x y c;
+
+    @set_cursor 3 74; print generation++;
+
+    for (y = 1: y <= 22: y++)
+        for (x = 1: x <= 67: x++)
+        {
+            c = CalcLoc(x, y);
+            n = Neighbours(x, y, c);
+
+            switch (oldcomm->c)
+            {
+                0:      if (n == 3)
+                        {   if (usecolour == 1)
+                                newcomm->c = (oldcomm->c) + 1;
+                            else newcomm->c = 1;
+                        }
+                1 to 6: if (n <= 1) newcomm->c = 0;
+                        if (n == 2 or 3)
+                        {   if (usecolour == 1)
+                                newcomm->c = (oldcomm->c) + 1;
+                            else newcomm->c = 1;
+                        }
+                        if (n >= 4) newcomm->c = 0;
+                7:      newcomm->c = 0;
+            }
+        }
+
+    for (y = 1: y <= 22: y++)
+        for (x = 1: x <= 67: x++)
+        {
+            c = CalcLoc(x, y);
+
+            PlotCell(x + 1, y + 1, newcomm->c);
+
+            oldcomm->c = newcomm->c;
+        }
+
+];
+
+[ PlotCell x y c;
+
+    if (usecolour == 1) ColourAge(c);
+    @set_cursor y x;
+    if (c > 0) print (char) CELL; else print (char) EMPTY;
+    if (usecolour == 1) @set_colour 2 9;
+
+];
+
+! ** Rules:
+!      (a) If a Z-Cell is empty,
+!            it becomes inhabited if 3 of its neighbouring Z-Cells are
+!            filled,
+!            otherwise it remains empty.
+!      (b) If a Z-Cell is filled,
+!            it dies of loneliness if it only has 1 or 0 neighbours,
+!            it lives on, unchanged, if it has 2 or 3 neighbours,
+!            it dies of overcrowding if it has 4 or more neighbours.
+!      (Neighbours include diagonals.)
+!    Also, if you have the colour/age option on:
+!      (c) A Z-Cell, notwithstanding loneliness or overcrowding, has a life
+!          expectancy of seven generations.
+!      (d) The age of a Z-Cell is shown graphically by its colour. This
+!          ranges from dark (black, first generation) to light (yellow,
+!          seventh generation).
+[ Neighbours x y c  n;
+
+    if (y > 1)
+        if (oldcomm->(c - 67)     > 0) n++;
+    if (x < 67 && y > 1)
+        if (oldcomm->(c - 67 + 1) > 0) n++;
+    if (x < 67)
+        if (oldcomm->(c + 1)      > 0) n++;
+    if (x < 67 && y < 22)
+        if (oldcomm->(c + 67 + 1) > 0) n++;
+    if (y < 22)
+        if (oldcomm->(c + 67)     > 0) n++;
+    if (x > 1 && y < 22)
+        if (oldcomm->(c + 67 - 1) > 0) n++;
+    if (x > 1)
+        if (oldcomm->(c - 1)      > 0) n++;
+    if (x > 1 && y > 1)
+        if (oldcomm->(c - 67 - 1) > 0) n++;
+
+    return n;
+
+];
+
+[ CalcLoc x y  c;
+
+    if (x > 67 || x < 1 || y > 22 || y < 1) c = 1474;
+    else c = ((y * 67) - 67 + x) - 1;
+
+    return c;
+
+];
+
+[ ColourAge c;
+
+    switch (c)
+    {   1: @set_colour 2 9; ! Black
+        2: @set_colour 6 9; ! Blue
+        3: @set_colour 3 9; ! Red
+        4: @set_colour 7 9; ! Magenta
+        5: @set_colour 4 9; ! Green
+        6: @set_colour 8 9; ! Cyan
+        7: @set_colour 5 9; ! Yellow
+    }
+
+];
+
+#END;

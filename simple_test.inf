@@ -1,0 +1,6 @@
+[ Main;
+    print "cells ", 0->$20, " by ", 0->$21, "^";
+    print "units ", $22-->0, " by ", $22-->1, "^";
+    @aread "Press a key" -> sp;
+];
+

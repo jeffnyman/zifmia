@@ -1,0 +1,606 @@
+!               *** Hunt the Wumpus ***
+! Original game written in BASIC by Gregory Yob, 1972.
+! Ported to Inform by Magnus Olsson (zebulon@pobox.com).
+! This port copyright 1999 by Magnus Olsson.
+! This file and Z-code files compiled from it may be 
+! distributed freely as long as no fee (with the exception
+! of distribution costs) is charged.
+
+! Written for Inform 6.21.
+! Self-contained; does not use the Inform Library.
+
+! Note: This port is not a literal, line-by-line translation of
+! the original BASIC source, but rather a re-implementation that
+! uses the original rules (with some very minor modifications) and 
+! some of the original algorithms. The help text and most of the
+! game's output is as in the original (except that the original
+! was in ALL CAPS). This, incidentally, is why I feel I can claim
+! copyright for this port - but this claim is not intended to rob
+! Gregory Yob of any of the kudos for his original version.
+
+
+! A global array used as a buffer for reading player input.
+constant INPUTSIZE 250;
+array input->(INPUTSIZE + 1);
+
+! Some game constants. In the original game, all of these are hard-coded,
+! but it's nicer to make them symbolic constants so they can be changed.
+constant EXITS 3; ! Number of exits from each room
+constant BATCOUNT 2; 
+constant PITCOUNT 2;
+
+! The values of deadflag that indicate the outcome of the game
+! (0 means game in progress, any other value ends the game on the
+! next turn).
+constant WIN 1;
+constant LOSE 2;
+constant QUIT 3;
+
+global cave; ! The current map
+global deadflag; ! Set to non-zero to end game on next turn
+global arrows; ! Arrows left; player loses if it drops to 0
+
+! Positions of player, wumpus, bats and pits
+global player; 
+global wumpus;
+array bats->BATCOUNT;
+array pits->PITCOUNT;
+
+! Copies of starting positions, in case we want to repeat the game
+global player_save;
+global wumpus_save;
+array bats_save->BATCOUNT;
+array pits_save->PITCOUNT;
+
+! Read a string from the keyboard into the global buffer.
+[ gets i;
+    input->1 = 0;
+    @aread input 0 0 0 i;
+];
+
+! Read a string and try to interpret it as a positive integer.
+[ getnum i num c ok;
+    do {
+        gets();
+        num = 0;
+        ok = TRUE;
+        for (i = 0 : i < input->1 : ++i) {
+	    c = input->(i + 2);
+   	    if (c < '0' || c > '9') {
+	        ok = FALSE;
+	        break;
+  	    }
+	    num = 10 * num + c - '0';
+	}
+	if (~~ok) 
+	    print "Bad number - try again: ";
+    } until (ok);
+    return num;
+];
+    
+! Read a single keypress    
+[ getc i;
+    do {
+        @read_char 1 0 0 i;
+    } until (i >= 32); ! Accept only printable characters
+    return i;
+];
+
+! Each cave is represented by an object of the class cavemap.
+! This class also has methods for some map-manipulation tasks.
+class cavemap
+with
+    id 0,
+    tunnels 0, ! The connections between the rooms
+
+    ! Return the number of rooms on the map
+    size [ ;
+        return (self.tunnels-->0) / 3;
+    ],
+
+    ! Return a random location somewhere in the cave
+    randloc [ ;
+        return random(self.size());
+    ],
+
+    ! Return the room at the other end of a tunnel
+    tunnel [ room tunnel r;
+        if (room < 1 || room > self.size())
+	    print "^Error: bad room number^";
+	if (tunnel < 0 || tunnel >= EXITS)
+	    print "^Error: bad tunnel number^";
+        r = (room - 1) * EXITS + tunnel + 1;
+	return self.tunnels-->r;
+    ],
+
+    ! Print the player's current position and where he can go,
+    ! and warn about nearby hazards
+    printloc [ room i j k;
+        for (i = 0 : i < EXITS : ++i) {
+	    k = cave.tunnel(room, i);
+	    if (k == wumpus)
+	        print "I smell a wumpus!^";
+	    for (j = 0 : j < PITCOUNT : ++j)
+	        if (k == pits->j) {
+		    print "I feel a draft!^";
+		    break; ! Don't repeat yourself
+		}
+	    for (j = 0 : j < BATCOUNT : ++j)
+	        if (k == bats->j) {
+		    print "Bats nearby!^";
+		    break; 
+		}
+	}
+	print "You are in room ", room, "^";
+	print "Tunnels lead to";
+	for (i = 0 : i < EXITS : ++i)
+	    print " ", self.tunnel(room, i);
+        new_line;
+    ],
+
+    ! Debugging functions
+    printinfo [ i;
+        print "W: ", wumpus, " P:";
+	for (i = 0 : i < PITCOUNT : ++i)
+	    print " ", pits->i;
+	print " B:";
+	for (i = 0 : i < BATCOUNT : ++i)
+	    print " ", bats->i;
+        new_line;
+    ],
+    printmap [ room t;
+        print "Cave ~", (string) self.id, "~ has ", self.size(), " rooms.^";
+	for (room = 1 : room <= self.size() : ++room) {
+	    print "Room ", room, " has exits to ";
+	    for (t = 0 : t < EXITS : ++t)
+		print self.tunnel(room, t), " ";
+	    new_line;
+	}
+    ]
+;
+
+! The caves.
+! The original game used the dodecahedron map. The other maps are
+! from Ahl's book.
+
+! Each cave is represented by a cavemap object. However, the connections
+! between the rooms won't fit in an object property (which can contain
+! at most 32 numbers), so we have to put this information in global 
+! tables and then let the cavemap objects refer to these. (In C++ parlance,
+! the tunnels property contains a reference to the array of tunnels, rather
+! than the array itself).
+array dodecahedron_tunnels table 
+      2 5 8 1 3 10 2 4 12 3 5 14 1 4 6 5 7 15 6 8 17 1 7 9 8 10 18 2 9 11
+      10 12 19 3 11 13 12 14 20 4 13 15 6 14 16 15 17 20 7 16 18 9 17 
+      19 11 18 20 13 16 19;
+
+cavemap dodecahedron
+with
+    id "Dodecahedron",
+private
+    tunnels dodecahedron_tunnels
+;
+
+array mobius_tunnels table
+      20 2 3 19 1 4 1 4 5 2 3 6 3 6 7 9 12 13 10 11 14 11 14 15 12 13 16 
+      12 16 17 9 12 13 10 11 14 11 14 15 12 13 16 12 16 17 14 15 18 15 18
+      19 16 17 20 2 17 20 1 18 19;
+
+cavemap mobius
+with
+    id "M@:obius Strip",
+private
+    tunnels mobius_tunnels
+;
+
+array beads_tunnels table
+      2 3 20 1 3 4 1 2 4 2 3 5 4 6 7 5 7 8 5 6 8 6 7 9 8 10 11 9 11 12
+      9 10 12 10 11 13 12 14 15 13 15 16 13 14 16 14 15 17 16 18 19 17
+      19 20 17 18 20 1 18 19;
+
+cavemap beads
+with
+    id "String of Beads",
+private
+    tunnels beads_tunnels
+;
+
+array dendrite_tunnels table
+      1 1 5 2 2 5 3 3 6 4 4 6 1 2 7 3 4 7 5 6 10 8 9 9 8 8 10 7 9 11
+      10 13 14 12 13 13 11 12 12 11 15 16 14 17 18 14 19 20 15 17 17
+      15 18 18 16 19 19 16 20 20;
+
+cavemap dendrite
+with
+    id "Dendrite",
+private
+    tunnels dendrite_tunnels
+;
+
+array lattice_tunnels table
+      5 4 8 1 5 6 2 6 7 3 7 8 8 9 12 5 9 10 6 10 11 7 11 12 12 13 16 
+      9 13 14 10 14 15 11 15 16 16 17 20 13 17 18 14 18 19 15 19 20 
+      1 4 20 1 2 17 2 3 18 3 4 19;
+
+cavemap lattice
+with
+    id "One-way Lattice",
+private
+    tunnels lattice_tunnels
+;
+
+! To make it easy to choose one of the caves, we put all the caves
+! in one array (actually the array contains references to the cavemaps).
+array caves table 
+    dodecahedron mobius beads dendrite lattice;
+
+
+
+! Return a free position (neither player, nor wumpus, nor pit, 
+! nor bats there)
+[ freeloc i p;
+    .retry;
+    p = cave.randloc();
+    for (i = 0 : i < BATCOUNT : ++i)
+        if (p == bats->i)
+	    jump retry;
+    for (i = 0 : i < PITCOUNT : ++i)
+        if (p == pits->i)
+	    jump retry;
+    if (p == player || p == wumpus)
+        jump retry;
+
+    return p;
+];
+
+! There are a number of caves to choose from (contained in the
+! global array caves). Prompt the player for which one to use.
+[ selectcave i;
+    print "You can choose between the following caves:^";
+    for (i = 1 : i <= caves-->0 : ++i)
+        print i, ": The ", (string) (caves-->i).id, "^";   
+    do {
+        print "Which cave (1-", caves-->0, ")? ";
+        i = getnum();
+    } until (i > 0 && i <= caves-->0);
+    cave = caves-->i;
+];
+
+! Set up the player, wumpus, pits and bats
+[ init sameaslast i;
+    arrows = 5;
+    if (sameaslast) {
+        player = player_save;
+	wumpus = wumpus_save;
+        for (i = 0 : i < BATCOUNT : ++i)
+            bats->i = bats_save->i;
+        for (i = 0 : i < PITCOUNT : ++i)
+            pits->i = pits_save->i;
+    }
+    else {
+	selectcave();
+        print "OK, using the ", (string) cave.id, "^^";
+        ! First move everything off the map so we can use freeloc().
+        player = 0;
+        wumpus = 0;
+        for (i = 0 : i < BATCOUNT : ++i)
+            bats->i = 0;
+        for (i = 0 : i < PITCOUNT : ++i)
+            pits->i = 0;
+
+        player = freeloc();
+        player_save = player;
+        wumpus = freeloc();
+        wumpus_save = wumpus;
+        for (i = 0 : i < BATCOUNT : ++i) {
+            bats->i = freeloc();
+            bats_save->i = bats->i;
+        }
+        for (i = 0 : i < PITCOUNT : ++i) {
+            pits->i = freeloc();
+	    pits_save->i = pits->i;
+        }
+    }
+];
+
+! When the wumpus is awakened by the player's shooting an arrow,
+! or even bumping into him, he either stays or moves to a neighbouring
+! room
+[ movewumpus dir;
+    dir = random(4) - 1;
+    if (dir < 3)
+        wumpus = cave.tunnel(wumpus, dir);
+    ! Note: no need to check for wumpus moving into bats or a pit -
+    ! he's too heavy to lift and has sucker feet, remember? But
+    ! if the wumpus moves into the player's location...
+    if (wumpus == player) {
+        print "Tsk tsk tsk - wumpus got you!^";
+	deadflag = LOSE;
+    }
+];
+
+! Move the player
+[ moveplayer dest i ok;
+    do {
+        print "Where to? ";
+        dest = getnum();
+	ok = FALSE;
+        for (i = 0 : i < EXITS : ++i)
+	    if (cave.tunnel(player, i) == dest) {
+	        ok = TRUE;
+		break;
+	    }
+	if (~~ok)
+	    print "Not possible - ";
+    } until (ok);
+    new_line;
+    player = dest;
+    
+    ! Did the player move into a hazard?
+    if (player == wumpus) {
+        print "...Oops! Bumped a wumpus!^";
+	movewumpus();
+	if (deadflag ~= 0)
+	    return; ! Wumpus ate player; no need to continue
+    }
+    for (i = 0 : i < PITCOUNT : ++i)
+        if (player == pits->i) {
+	    print "YYYYIIIIEEEE... Fell in pit!^";
+	    deadflag = LOSE;
+	    return;
+	}
+    for (i = 0 : i < BATCOUNT : ++i)
+	if (player == bats->i) {
+	    print "Zap - super bat snatch! Elsewhereville for you!^";
+	    ! Note: this is (arguably) an improvement over the original,
+	    ! where the bats may dump you into a pit or on top of the
+	    ! wumpus - here you're guaranteed to end up in an empty
+	    ! location.
+	    player = freeloc();
+	    return;
+	}
+];
+
+! Array used by the shoot routine - why can't I have local arrays when 
+! I need them?
+array path->5; 
+
+! Shoot an arrow. This is rather complex since the arrow can move up
+! to five rooms.
+[ shoot i j r1 r2 rooms ok;
+    do {
+	print "No. of rooms (0-5)? ";
+        rooms = getnum();
+    } until (rooms <= 5);
+
+    ! This is an extension to the original Wumpus - in the original
+    ! game, once you'd typed "S", you had to fire an arrow. Modern
+    ! players are spoiled and we'll cut them some slack.
+    if (rooms == 0) {
+        print "OK, suit yourself...^";
+	return;
+    }
+        
+    ! Get the path of the arrow
+    for (i = 0 : i < rooms : ++i)
+	do {
+            print "Room #? ";
+            r2 = getnum(); ! Next location of arrow
+	    ok = TRUE;
+	    if (r2 < 1 || r2 > cave.size()) 
+	        ok = FALSE; ! Bad room number
+
+            ! Check for loops in the path (presumably, to avoid
+	    ! a path of the type 1->2->1->3->1->4 which visits
+	    ! all the neighbouring rooms, getting the wumpus with
+	    ! 100% certainty. That's no sport!
+	    if (ok && i > 1 && r2 == path->(i - 2)) {
+		print "Arrows aren't that crooked - try another room!^";
+		ok = FALSE;
+            }
+	    if (ok) {
+  	        path->i = r2;
+	        r1 = r2;
+	    }
+	} until (ok);
+
+    ! Shoot arrow and see if it hit something
+    r1 = player; ! Current location of arrow
+    for (i = 0 : i < rooms : ++i) {
+        r2 = path->i; ! Next location
+        ! Check if arrow can move from r1 to r2
+	ok = FALSE;
+	for (j = 0 : j < EXITS : ++j)
+	    if (cave.tunnel(r1, j) == r2)
+	        ok = TRUE;
+        if (~~ok)
+	    ! No tunnel for arrow
+	    r2 = cave.tunnel(r1, random(3) - 1);
+	print r2, "^";
+
+        if (r2 == wumpus) {
+	    print "Aha! You got the wumpus!^";
+	    deadflag = WIN;
+	    return;
+        }
+        else if (r2 == player) {
+	    print "Ouch! Arrow got you!^";
+	    deadflag = WIN;
+	    return;
+        }
+	r1 = r2;
+    }
+
+    ! Didn't hit anything - but the wumpus will wake up!
+    print "Missed!^";
+    movewumpus();
+    ! Ammo check - not necessary if we're already dead
+    if (deadflag == 0 && --arrows <= 0) {
+        print "You've run out of arrows!^";
+        deadflag = LOSE;
+    }
+];
+
+! Main command loop
+[ play command ok;
+    deadflag = 0;    
+    do {
+        cave.printloc(player);
+        do {
+	    print "Shoot, Move or Quit (S-M-Q)? ";
+            command = getc();
+	    print (char) command, "^";
+	    ok = TRUE;
+	    switch (command) {
+		'S', 's': shoot();
+		'M', 'm': moveplayer();
+	        'Q', 'q': deadflag = QUIT;
+	        default: ok = FALSE;
+            }
+        } until (ok);
+    } until (deadflag > 0);
+
+    switch (deadflag) {
+        QUIT:
+	    print "^Chicken!^";
+        LOSE: 
+	    print "^Ha ha ha - you lose!^";
+	WIN:
+	    print "^Hee hee hee - the wumpus'll get you the next time!^";
+	default:
+	    print "Error: bad value of deadflag.^";
+    }
+];
+
+! Two help functions for text formatting - emphasized and bold
+[ em str;
+    style underline;
+    print (string) str;
+    style roman;
+];
+
+[ bo str;
+    style bold;
+    print (string) str;
+    style roman;
+];
+
+[ instructions ;
+    print (bo) "Welcome to ~Hunt the Wumpus~!^",
+        "The wumpus lives in a cave of 20 rooms. Each room has 3
+	tunnels leading to other rooms. (Look at a dodecahedron to see
+	how this works - if you don't know what a dodecahedron is, ask
+	someone).^^", 
+	(bo) "Hazards^",    
+        "Bottomless pits - two rooms have bottomless pits in them. If
+	you go there, you fall into the pit (& lose!)^Super bats - two
+	other rooms have super bats.  If you go there, a bat grabs you
+	and takes you to some other room at random. (Which may be
+	troublesome).^^",
+	(bo) "Wumpus^",
+	"The wumpus is not bothered by hazards (he has sucker feet and
+	is too big for a bat to lift).  Usually he is asleep.  Two
+	things wake him up: you shooting an arrow or you entering his
+	room.^^If the wumpus wakes he moves (p=.75) one room or stays
+	still (p=.25).  After that, if he is where you are, he eats
+	you up and you lose!^^",
+	(bo) "You^",
+	"Each turn you may move or shoot a crooked arrow.^
+        Moving: you can move one room (thru one tunnel).^
+	Arrows: you have 5 arrows. You lose when you run out. Each
+	arrow can go from 1 to 5 rooms. You aim by telling the
+	computer the rooms you want the arrow to go to.  If the arrow
+	can't go that way (if no tunnel) it moves at random to the
+	next room. If the arrow hits the wumpus, you win.  If the
+	arrow hits you, you lose.^^",
+	(bo) "Warnings^",
+	"When you are one room away from a wumpus or hazard, the computer 
+	says:^^
+        Wumpus: ~I smell a wumpus~^
+        Bat: ~Bats nearby~^
+        Pit: ~I feel a draft~^^";
+];
+
+[ notes ;
+    print (em) "Hunt the Wumpus", " is a classic among early 
+	computer games. Today it's interesting not so much
+        because of its qualities as a game, but because it was
+        probably the first game to take place on a map consisting of
+        rooms connected by passages. Other games had used maps before,
+        but those maps were in essence coordinate grids, whereas in ",
+        (em) "Wumpus",	
+	" the map consists of a set of rooms and descriptions of how
+	to move between them - the type of map that has become the
+	standard for adventure games.^^
+	The original version of ", (em) "Wumpus", " was written in
+	1972 by Gregory Yob and later published in David Ahl's classic
+	collection of Basic Computer Games. This Inform version
+	(including the alternate caves) is based on the version in
+	Ahl's book. It is not a ~literal~ translation of the Basic
+	source, but it uses the same algorithms and rules, with
+	two exceptions:^^
+	1) When shooting an arrow you may enter ~0~ when prompted
+	how many rooms you want to shoot. This aborts the shot.^
+	2) The super bats never drop you in a pit or on top of
+	the wumpus.^^
+	Players interested in the gory details are encouraged to
+	study the source code, wumpus.inf, available from the
+	IF archive.^^
+	This port was inspired by Andrew Plotkin's game ",
+	(em) "Hunter, in Darkness.^^";
+
+];
+
+[ banner i;
+    style bold;
+    print "^^^^Hunt the Wumpus^";
+    style roman;
+    print "Original BASIC version (1972) by Gregory Yob.^";
+    print "Inform port (1999) by Magnus Olsson <zebulon@@64pobox.com>.^";
+    print "Release ", (0-->1) & $03ff, " / Serial number ";
+    for (i=18 : i < 24 : ++i) 
+        print (char) 0->i;
+    print " / Inform v"; inversion; print "^^";
+];
+
+[ Main i repeat;
+    banner();
+    do {
+        print (bo) "Type 1 to read the instructions, 
+	    2 to read the implementation notes, 3 to play the game, 
+	    or 4 to quit.^";
+	do {
+	    i = getc();
+	} until (i >= '1' && i <= '4');
+	print (char) i, "^^";
+	if (i == '1')
+	    instructions();
+	else if (i == '2')
+	    notes();
+    } until (i >= '3');
+
+    if (i < '4') {
+        input->0 = INPUTSIZE;
+        repeat = FALSE;
+        while (TRUE) {
+            init(repeat);
+	    play();
+	    print "^Play again? (Y-N) ";
+	    i = getc();
+	    print (char) i, "^";
+	    if (i == 'n' || i == 'N')
+	        break;
+	    print "Same setup? (Y-N) ";
+	    i = getc();
+	    print (char) i, "^";
+	    if (i == 'n' || i == 'N')
+	        repeat = FALSE;
+	    else
+		repeat = TRUE;
+	    print "^^^";
+        }
+    }
+];
+    
+
+

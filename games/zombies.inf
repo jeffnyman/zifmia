@@ -1,0 +1,791 @@
+! --------------------------------------------------------------------------
+!  "ZOMBIES":  Yet another abuse of the Z-machine, by David Magnus Ledgard
+!  (dledgard@hotmail.com). Based on a game I played on the Commodore PET many
+!  years ago and Torbjörn Anderssons (d91tan@Update.UU.SE) Robots code 
+!  Copied Right in 1995-1997 which he gave me permission to use. If you find
+!  any bugs or think the game is too easy or difficult let me know. Robots
+!  and Zombies are probably based on the same original game. If anyone 
+!  remembers similar games I would be interested to hear about them and what
+!  platforms they ran on. Torbjörn said his version of Robots was based on 
+!  a unix game, hence the redraw command which redraws the screen after
+!  messages are received. I haven't removed the waitbonus from the code
+!  although in this version the player recieves the same score whether a 
+!  Zombie is killed while the player is waiting OR moving. I changed the
+!  movement keys to the PET setup, this also is a more logical configuration.
+! --------------------------------------------------------------------------
+
+#ifv3;
+Message fatalerror "This program must be compiled as a version 4 (or
+    later) story file.";
+#endif;
+
+Switches xv5s;
+
+Release 1;
+
+! Game constants
+
+Constant PrefLines	24;		! This is the screen size for which
+Constant PrefCols	80;		! the game is designed.
+
+Constant FieldRows	22;		! Size of the playing field.
+Constant FieldColumns	59;
+Constant FieldSize	FieldRows * FieldColumns;
+
+Constant ZombieScore	1;		! Points for killing one zombie
+Constant BonusScore	1;		! Ditto while 'W'aiting.
+Constant Zombie		'Z';		! Symbols used on the game field
+Constant Player		64;		! '@'
+Constant Empty		0;
+
+Constant IncZombies	2;		! Zombies added for each level
+Constant MaxZombies	300;		! Max number of zombies
+! Global variables
+
+Global Pit	        = 'O';
+
+Global score		= 0;		! Current score
+Global high_score	= 0;		! Highest score this session
+Global waiting		= 0;		! Set when 'W'aiting
+Global wait_bonus	= 0;		! Bonus while waiting
+Global beep_flag	= 1;		! Sound on/off
+Global player_x		= 0;		! Player's current position
+Global player_y		= 0;		!          -  "  -
+Global num_zombies;                	! Number of zombies on level
+Global active_zombies;	          	! Number of live zombies on level
+
+! The PlayingField contains information about zombies and pits (though not
+! about the player). It is used for fast lookup when moving the player or a
+! zombie. An alternative solution would be to keep an array of the pits,
+! similar to ZombieList, which would save memory but which would also be much
+! less efficient.
+
+Array PlayingField ->  FieldSize;
+
+! The ZombieList encodes the individual zombies' positions in words (two 
+! bytes), and is used to speed up the operations which work on all zombies.
+! It would be possible to search PlayingField, but that would be impractical.
+! It is assumed that no player will survive long enough for the array to
+! overflow.
+
+Array ZombieList    --> MaxZombies;
+
+! --------------------------------------------------------------------------
+!   MAIN FUNCTION
+! --------------------------------------------------------------------------
+
+[ Main screen_height screen_width i;
+    screen_height = 0->32;
+    screen_width  = 0->33;
+
+    if (screen_height < PrefLines || screen_width < PrefCols) {
+	style bold;
+	print "^^[The interpreter thinks your screen is ", screen_width,
+	      (char) 'x', screen_height, ". It is recommended that you \
+	      use at least ", PrefCols, (char) 'x', PrefLines, ".]";
+	style roman;
+    }
+
+    print "^^", (Strong) "ZOMBIES", " - Yet another abuse of the ",
+	(Emphasize) "Z-Machine", 
+        "^A nostalgic diversion by David Magnus Ledgard with a large portion^
+          of the code shamelessly borrowed from Torbj@:orn Andersson, a^
+          tiny tiny portion being lifted from Infocom's ~The Lurking Horror~.
+        ^Release ", (0-->1) & $03ff, " / Serial number ";
+
+    for (i = 18 : i < 24 : i++)
+	print (char) 0->i;
+
+    print " / Inform v";
+    inversion;
+
+    print "^^>LOOK^", (Strong) "Dead Storage^",
+    "This is a storage room. It contains an incredible assemblage of 
+     discarded junk. Some of it is so old and mouldering that you can't
+     be sure where one bit of junk stops and the next begins. It's piled
+    to the ceiling on ancient, rotting pallets. A narrow path winds
+    eastward through the junk.^^",
+    ">SEARCH JUNK^",
+    "You find many worthless items of hardware, old discarded memos and
+     papers, but nothing of any use or value. But wait...^
+     What's that in the corner? A lesser adventurer may have passed this by 
+     but not you. It seems to be an old Commodore PET computer and looks 
+     like it just might work. Next to the computer are two tapes one with the
+     word ~Zombies~ scrawled on it in Biro. The other one is labeled ~Wrap~.
+     Behind the computer on the wall is a power outlet.^^",
+    ">EXAMINE COMPUTER^",
+    "In computer years this computer is older than Noah's Ark, but in actual
+     years it is a little over two decades old. It consists of a monochrome
+     monitor, tape deck, keyboard (with lots of funny little symbols on the
+     letter keys including hearts, diamonds, spades, clubs, and corners,
+     sides and crosses to allow the user to draw boxes on the screen),
+     on/off switch and power cable; all build into one convenient trapezoidal
+     unit. Performance wise it uses an 8 Bit MOS 6502 processor, has a
+     whopping 4K of memory and the BASIC language on a built in ROM.^^",
+    ">PLUG POWER CABLE INTO POWER OUTLET^",
+    "Done.^^",
+    ">TURN COMPUTER ON^",
+    "You switch the computer on.^ 
+     The screen lights up and the word ~Ready.~ appears in bright green text
+     with a flashing green cursor beneath it.^^",
+    ">PUT ZOMBIES TAPE IN TAPE DECK^",
+    "(Taking the Zombies Tape first)^",
+    "Done.^^",
+    ">TYPE LOAD ~ZOMBIES~ AND PRESS PLAY ON TAPE DECK^",
+    "Done.^Done.^The word ~Loading~ appears on the screen and the tape starts
+     spinning.^^",
+    ">WAIT.^The tape is still spinning but not much else is happening.^^",
+    ">WAIT.^The tape is still spinning but not much else is happening.^^",
+    ">WAIT.^The tape is still spinning but not much else is happening.^^",
+    ">WAIT.^At last the tape stops spinning and the word ~Ready.~ appears on
+     the screen.^^",
+    ">TYPE RUN^
+     The screen displays, ~Do you want (s)hallow or (d)eep pits?~^";
+
+    ! Waits until either S or D is pressed setting the pit variable
+    ! accordingly for later reference
+    for (::)
+    { 
+      i = ReadKeyPress();
+      if (i=='S')
+      {
+        Pit = 'o';
+        break;
+      }
+      if (i=='D')
+      {
+        Pit = 'O';
+        break;
+      }
+    }
+
+    while (PlayGame());
+
+    ! This magic incantation should restore the screen to something
+    ! more normal (for a text adventure). Actually, I'm not 100% sure
+    ! how much of this is really needed.
+    @set_cursor 1 1;
+    @split_window 0;
+    @erase_window $ffff;
+    @set_window 0;
+
+    print "^^I decided to write this game because I wanted to see how easy it
+        was to get the Inform language to do something it wasn't really
+        designed for and because this game is quite nostelgic to me. The PET
+        was the first computer I ever used and me and my friends used to play
+        this game and a few others when we were kids during our school
+        lunchbreak. This game is surprisingly fun for something so
+        simple. It just goes to show the old games are the best!^^";
+    print "[Press any key to exit.]^";
+
+    ReadKeyPress();
+    quit;
+];
+
+! --------------------------------------------------------------------------
+!   THE ACTUAL GAME
+! --------------------------------------------------------------------------
+
+! This function plays a game of "zombies"
+
+[ PlayGame x y n key got_keypress meta old_score;
+    ! Clear the screen, initialize the game board and draw it on screen.
+    y = FieldRows + 2;
+
+    @erase_window $ffff;
+    @split_window y;
+    @set_window   1;
+
+    score         = 0;
+    num_zombies    = 10;
+    active_zombies = num_zombies;
+
+    InitPlayingField();
+    DrawPlayingField();
+
+    ! "Infinite" loop (there are 'return' statements to terminate it) which
+    ! waits for keypresses and moves the zombies. The 'meta' variable is used
+    ! to keep track of whether or not anything game-related really happened.
+    for (::) {
+	meta = 0;
+
+	! Remember the player's old position.
+	x = player_x;
+	y = player_y;
+
+	! Wait for a valid keypress. If the player is 'W'aiting, it is the
+	! same as if he or she is constantly pressing the '.' key, except the
+	! zombies will actually be allowed to walk into the player.
+	for (got_keypress = 0 : ~~got_keypress :) {
+	    got_keypress = 1;
+
+	    if (~~waiting)
+		key = ReadKeyPress();
+	    else
+		key = '.';
+
+	    if (wait_bonus == -1) {
+		wait_bonus = 0;
+		n = FieldColumns + 4;
+		@set_cursor 24 n;
+		spaces(10);
+	    }
+
+	    switch (key) {
+		'Q': player_x--; player_y--;
+		'W': player_y--;
+		'E': player_x++, player_y--;
+		'A': player_x--;
+		'D': player_x++;
+		'Z': player_x--; player_y++;
+		'X': player_y++;
+		'C': player_x++; player_y++;
+		'.':
+		    old_score  = score;
+		    wait_bonus = 0;
+		    waiting    = 1;
+                'S':
+		'T':
+		    return AnotherGame();
+		'R':
+		    DrawPlayingField();
+		    meta = 1;
+		'B':
+		    if (~~beep_flag)
+			beep_flag = 1;
+		    else
+			beep_flag = 0;
+
+		    meta = 1;
+		default:
+		    got_keypress = 0;
+		    DoBeep();
+	    }
+	}
+
+	! If the command was a movement command, check if the player is 
+        ! move to a safe spot or not. 
+        !
+        ! If the player has moved, redraw that part of the game board.
+        !
+        ! If the move is not accepted, make sure the player remains at the
+	! original location, warn him or her, and make sure the zombies don't
+	! move.
+	if (~~meta) {
+	    if ((InsideField(player_x, player_y)  &&
+		SafeSpot(player_x, player_y))) {
+		    if (x ~= player_x || y ~= player_y) {
+			DrawObject(x, y, ' ');
+			DrawObject(player_x, player_y, Player);
+		    }
+	    } else {
+		if (~~waiting) {
+		    player_x = x;
+		    player_y = y;
+		    DoBeep();
+		    meta = 1;
+		}
+	    }
+
+	    ! If the player made a valid move, move the zombies.
+		MoveZombies();
+
+            ! The zombies have moved and dead zombies have been handled by
+	    ! MoveZombies(). Now it's time to see if the player survived, and
+	    ! maybe even won the game.
+	    if (GetPiece(player_x, player_y) == Empty) {
+		if (~~active_zombies) {
+		    waiting = 0;
+
+		    UpdateScore(0);
+
+		    num_zombies = num_zombies + IncZombies;
+
+		    if (num_zombies > MaxZombies)
+			num_zombies = MaxZombies;
+
+		    InitPlayingField();
+		    DrawPlayingField();
+	} else
+		    DrawObject(player_x, player_y, 0);
+	    } else {
+		DrawObject(player_x, player_y, 0);
+		print "AARRrrgghhhh....";
+
+		if (waiting) {
+		    score = old_score;
+		    waiting = 0;
+		}
+
+		UpdateScore(0);
+		return AnotherGame();
+	    }
+	}
+    }
+];
+
+! This function moves the zombies and handles zombies falling into pits.
+
+[ MoveZombies i j zombie_x zombie_y hit;
+    ! Traverse the list of active zombies. At this point there should be no
+    ! 'dead' zombies in the list.
+    for (i = 0, hit = 0 : i < active_zombies : i++) {
+	zombie_x = ZombieX(i);
+	zombie_y = ZombieY(i);
+
+	! Remove the zombie from the playing field and the game board (though
+	! not from the zombie list.
+	DrawObject(zombie_x, zombie_y, ' ');
+	PutPiece(zombie_x, zombie_y, Empty);
+
+	! The zombie will always try to move towards the player, regardless
+        ! of obstacles.
+	if (zombie_x ~= player_x) {
+	    if (zombie_x < player_x)
+		zombie_x++;
+	    else
+		zombie_x--;
+	}
+
+	if (zombie_y ~= player_y) {
+	    if (zombie_y < player_y)
+		zombie_y++;
+	    else
+		zombie_y--;
+	}
+
+	! Any zombie moving onto a pit is destroyed. Otherwise, the
+        ! zombie is inserted on the playing field at its new location.
+	if (GetPiece(zombie_x, zombie_y) == Pit) 
+        {
+	  hit = 1;
+	  ZombieList-->i = -1;
+	  UpdateScore(1);
+
+          if (Pit=='o')
+          {
+            DrawObject(zombie_x, zombie_y, ' ');
+            PutPiece (zombie_x, zombie_y, Empty);
+          }
+	} 
+        else 
+        {
+	  ! Draw the zombie on screen to reduce the flicker. The final
+	  ! drawing is done in the next loop, as some zombies may have
+	  ! been erased by other moving zombies.
+	  DrawObject(zombie_x, zombie_y, Zombie);
+	  PutZombie(zombie_x, zombie_y, i);
+        }
+    }
+
+    ! If a zombie was removed, clean up the zombie list.
+    if (hit)
+	CleanZombieList();
+
+    ! To make sure that no zombie is accidentally 'removed' from the board
+    ! (which could happen if a zombie onto another zombie before the other
+    ! zombie moves, since the other zombie will 'blank' its old position on
+    ! the board) we draw all the zombies again.
+    for (i = 0, hit = 0 : i < active_zombies : i++) {
+	zombie_x = ZombieX(i);
+	zombie_y = ZombieY(i);
+
+	DrawObject(zombie_x, zombie_y, Zombie);
+	PutPiece(zombie_x, zombie_y, Zombie);
+    }
+
+    ! If no zombies collided, all is done.
+    if (~~hit)
+	rtrue;
+
+    CleanZombieList();
+
+    ! This code is the game's major cause of slowdown.
+    for (i = 0, hit = 0 : i < active_zombies - 1 : i++) {
+	for (j = i + 1 : j < active_zombies : j++) {
+	    if (ZombieList-->i ~= -1 && ZombieList-->i == ZombieList-->j) {
+		zombie_x = ZombieX(i);
+		zombie_y = ZombieY(i);
+
+		PutPiece(zombie_x, zombie_y, Pit);
+		DrawObject(zombie_x, zombie_y, Pit);
+
+		ZombieList-->i = -1;
+		ZombieList-->j = -1;
+
+		! Don't give the player any points for zombies killing
+                ! him/her
+		if (zombie_x ~= player_x || zombie_y ~= player_y)
+		    UpdateScore(2);
+
+		! Since ZombieList-->i now is -1, we won't find any other
+		! zombies on the same position, so terminate the inner loop.
+		! I don't know if it'd be better to save the position of
+		! zombie i, and follow the loop to its very end.
+                break;
+	    }
+	}
+    }
+
+    ! I know at least one fell into a pit, and therefore I know that
+    ! zombies have been removed.
+    CleanZombieList();
+
+    ! And even now we are not done: What if three zombies went to the same
+    ! square? In that case, there should be a zombie sitting on a (shallow)
+    ! pit now. This can only happen if the previous loop detected an event. 
+    for (i = 0, hit = 0 : i < active_zombies : i++) {
+	zombie_x = ZombieX(i);
+	zombie_y = ZombieY(i);
+
+	if (GetPiece(zombie_x, zombie_y) == Pit) {
+	    hit = 1;
+	    ZombieList-->i = -1;
+         
+	    if (zombie_x ~= player_x || zombie_y ~= player_y)
+		UpdateScore(1);
+	}
+    }
+
+    if (hit)
+	CleanZombieList();
+];
+
+! --------------------------------------------------------------------------
+!   THE GAME BOARD
+! --------------------------------------------------------------------------
+
+! These two functions are used for printing the game board. This is done both
+! when starting on a level and when using the 'R'edraw command.
+
+[ DrawPlayingField i x y;
+    @erase_window 1;
+
+    ! Draw the border around the game board.
+    DrawHorizontalLine(1);
+    DrawHorizontalLine(FieldRows + 2);
+    x = FieldColumns + 2;
+
+    for (i = 2 : i <= FieldRows + 1 : i++) {
+	@set_cursor i 1;  print (char) '|';
+	@set_cursor i x;  print (char) '|';
+    }
+
+    ! Draw the zombies on the game board.
+    for (i = 0 : i < active_zombies : i++)
+	DrawObject(ZombieX(i), ZombieY(i), Zombie);
+
+    ! If some zombies have died, we have to traverse the entire PlayingField
+    ! looking for pits. Fortunately, this only happens when 'R'edrawing
+    ! the screen, which shouldn't be very often.
+    
+    for (x = 0 : x < FieldColumns : x++) 
+    {
+      for (y = 0 : y < FieldRows : y++) 
+      {
+	if (GetPiece(x, y) == Pit) 
+        {
+	  DrawObject(x, y, Pit);
+        }
+      }
+    }
+
+    ! Put some help text to the right of the game board.
+    x = FieldColumns + 4;
+
+    @set_cursor 1  x;  print "Directions:";
+
+    @set_cursor 3  x;  print "q w e";
+    @set_cursor 4  x;  print " @@92|/ ";
+    @set_cursor 5  x;  print "a-s-d";
+    @set_cursor 6  x;  print " /|@@92 ";
+    @set_cursor 7  x;  print "z x c";
+
+    @set_cursor 9  x;  print "Commands:";
+
+    @set_cursor 11 x;  print "s: sleep/wait";
+    @set_cursor 12 x;  print "t: terminate/quit";
+    @set_cursor 13 x;  print "r: redraw screen";
+    @set_cursor 14 x;  print "b: beep off/on";
+
+    @set_cursor 16 x;  print "Legend:";
+
+    @set_cursor 18 x;  print (char) zombie,    ": zombie";
+    @set_cursor 19 x;  print (char) Pit, ": pit";
+    @set_cursor 20 x;  print (char) Player,   ": you";
+
+    if (wait_bonus > 0) 
+    {
+      @set_cursor 24 x;	print "Bonus: ", wait_bonus;
+      wait_bonus = -1;
+    }
+
+    @set_cursor 22 x;  print "Score: ", score;
+    @set_cursor 23 x;  print "High:  ", high_score;
+
+    ! Finally, draw the player on the game board.
+    DrawObject(player_x, player_y, Player);
+    DrawObject(player_x, player_y, 0);
+];
+
+[ DrawHorizontalLine row i;
+    @set_cursor row 1;
+
+    print (char) '+';
+
+    for (i = 0 : i < FieldColumns : i++)
+      print (char) '-';
+
+    print (char) '+';
+];
+
+! --------------------------------------------------------------------------
+!   HELP FUNCTIONS
+! --------------------------------------------------------------------------
+
+[ Strong str;
+    style bold;
+    print (string) str;
+    style roman;
+];
+
+[ Emphasize str;
+    style underline;
+    print (string) str;
+    style roman;
+];
+
+! Test is a coordinate is safe to move it, ie that
+!
+!   a) There is no pit on it
+!   b) There are no zombies on any adjacent coordinate
+
+[ SafeSpot xpos ypos x y;
+    if (GetPiece(xpos, ypos) == Pit)
+	rfalse;
+
+    for (x = xpos - 1 : x <= xpos + 1 : x++) 
+    {
+      for (y = ypos - 1 : y <= ypos + 1 : y++) 
+      {
+	if (InsideField(x, y) && GetPiece(x, y) == Zombie)
+          rfalse;
+      }
+    }
+
+    rtrue;
+];
+
+! Update the score after killing 'n' zombies. If 'n' is 0 it will simply
+! redraw the score. If we are 'W'aiting, the score is not written since it
+! is not known whether or not the player will actually get points until he
+! or she has survived the entire level.
+
+[ UpdateScore n x;
+    if (n) 
+    {
+      if (waiting) 
+      {
+	wait_bonus = wait_bonus + n * (BonusScore - ZombieScore);
+	score = score + (n * BonusScore);
+      } 
+      else
+	score = score + (n * ZombieScore);
+    }
+
+    if (~~waiting) 
+    {
+      x = FieldColumns + 11;
+
+      @set_cursor 22 x;  print score;
+
+      if (score > high_score)
+      {
+	high_score = score;
+	@set_cursor 23 x;  print high_score;
+      }
+    }
+];
+
+! Ask the user if he or she wants to play another game
+
+[ AnotherGame x;
+    x = FieldColumns + 4;
+    @set_cursor 24 x;
+    print "Another game? ";
+
+    for (::)
+    {
+      switch (ReadKeyPress()) 
+      {
+	'Y': rtrue;
+	'N': rfalse;
+      }
+    }
+];
+
+! Get a new position for the player. This is used when starting on a new
+! level, and ensures that the player will not land on a zombie or in a pit.
+! The player may, however, land right next to a zombie.
+			
+[ GetNewPlayerPos;
+  for (::)
+  {
+    player_x = random(FieldColumns) - 1;
+    player_y = random(FieldRows) - 1;
+
+    if (GetPiece(player_x, player_y) == Empty)
+      break;
+  }
+];
+
+! The code which checks for zombies colliding is horrendously inefficient, so
+! in order to speed it up as the game proceeds, remove 'dead' zombies from
+! the list and keep a counter of 'active' zombies.
+
+[ CleanZombieList i j;
+    for (i = 0, j = 0 : i < active_zombies : i++) 
+    {
+      if (ZombieList-->i ~= -1) 
+      {
+	ZombieList-->j = ZombieList-->i;
+	j++;
+      }	    
+    }
+
+    active_zombies = j;
+];
+
+! --------------------------------------------------------------------------
+!   INITIALIZATION
+! --------------------------------------------------------------------------
+
+! Initialize the PlayingField and ZombieList
+
+[ InitPlayingField pits i x y;
+    active_zombies = num_zombies;
+
+    for (i = 0 : i < FieldSize : i++)
+	PlayingField->i = Empty;
+
+    !This adds more Pits if they are shallow so (a) there are enougth to
+    !kill all the Zombies and (b) give a player a reasonable chance of
+    !winning, without making things too easy. If you think the numbers I
+    !selected aren't good you can easily change them.
+    if (Pit=='O') pits = 20; 
+    if (Pit=='o') pits = 40;
+	
+    !This section of code places Pits at random on empty squares
+    for (i = 0 : i < pits : i++) 
+    {
+      for (::) 
+      {
+	x = random(FieldColumns) - 1;
+	y = random(FieldRows) - 1;
+
+        if (GetPiece(x, y) == Empty) 
+        {
+	  PutPiece(x, y, Pit);
+	  break;
+	}
+      }
+    }
+
+    !This section of code places Zombies around the each of the screen to
+    !give the player a fighting chance
+    for (i = 0 : i < num_zombies : i++) 
+    {
+      for (::) 
+      {
+	x = random(FieldColumns) - 1;
+	y = random(FieldRows) - 1;
+
+        if ( (GetPiece(x, y) == Empty) && 
+        ((x==0) || (x==FieldColumns-1) || (y==0) || (y==FieldRows-1)) )
+        {
+	  PutPiece(x, y, Zombie);
+	  PutZombie(x, y, i);
+	  break;
+        }
+      }
+    }
+
+    GetNewPlayerPos();
+];
+
+! --------------------------------------------------------------------------
+!   PRIMITIVES
+! --------------------------------------------------------------------------
+
+! Produce an annoying 'beep', if the sound is turned on. The sound is toggled
+! with 'S', which, since it isn't properly documented, must surely be a bug
+! rather than a feature. :-) This updated command may not work on old
+! interpreters like WInfocom.
+
+[ DoBeep;
+    if (beep_flag)
+	@sound_effect 1;
+];
+
+! Read a single character from stream 1 (the keyboard) and return it. If the
+! character is lower-case, it is translated to upper-case first.
+
+[ ReadKeyPress x;
+    @read_char 1 -> x;
+
+    if (x >= 'a' && x <= 'z')
+	x = x - ('a' - 'A');
+
+    return x;
+];
+
+! These two primitives are used for reading the PlayingField and inserting 
+! new values in it respectively.
+
+[ GetPiece x y;
+    return PlayingField->(y * FieldColumns + x);
+];
+
+[ PutPiece x y type;
+    PlayingField->(y * FieldColumns + x) = type;
+];
+
+! These three primitives are used for getting and setting the coordinates of
+! a zombie respectively. A dead zombie is marked as -1 in ZombieList, and it
+! is up to the calling functions to test this if necessary.
+
+[ ZombieX n;
+    return (ZombieList-->n) / 256;
+];
+
+[ ZombieY n;
+    return (ZombieList-->n) % 256;
+];
+
+[ PutZombie x y n;
+    ZombieList-->n = x * 256 + y;
+];
+
+! Print a character on the game board. Note that it is up to the calling
+! function to make sure that this bears any resemblance to what is actually
+! stored in the PlayingField.
+
+[ DrawObject x y c;
+    x = x + 2;
+    y = y + 2;
+
+    @set_cursor y x;
+
+    if (c)
+	print (char) c;
+];
+
+! Primitive for testing if a coordinate is inside the game board.
+
+[ InsideField x y;
+    if (x >= 0 && y >= 0 && x < FieldColumns && y < FieldRows)
+	rtrue;
+    rfalse;
+];
+
+end;

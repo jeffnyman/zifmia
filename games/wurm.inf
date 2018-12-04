@@ -1,0 +1,273 @@
+! Inform game   C.V.F. Knight 2001
+
+Constant Story "WURM";
+Constant Headline "^A blatant abuse of the Z-Machine by C.V.F. Knight^";
+Release 2;
+! Written 9 April 2001. (unreleased)
+! Release 1 19 November 2001:
+! text tightened, adjusted timing, added cursor keys and exit insult
+!
+! Release 2 27 November 2002:
+! interpreter detection fixed (now works on Linux *and* JZIP)
+! superfluous buffermode & setwindow operations removed
+! centres each game (still crashes on small WinFrotz window)
+
+Constant px=32;  ! playing area size... could be wider
+Constant py=22;
+Constant mw=200;  ! maximum length of worm before it splits
+
+Global sx=40; ! screen size - initial value overwritten
+Global sy=22;
+Global ox=0;  ! offset of top left of play area 
+Global oy=0;
+Global level=0;
+Global score=0;
+Global champ=0;
+Global d=0; !direction
+Global e=0; !eaten - how much worm will grow by
+Global mx=0; !worm head co-ordinates
+Global my=0;
+Global wh=0; !head index
+Global wt=0; !tail index
+Global nc=0; !number of edibles remaining
+Global c=0;  ! cell contents in Main()
+Global del=0; !play speed
+Global deadflag=1; ! 2 for nextlevel (win), 1 for new game
+
+Array cell -> 
+"You have been staring at this computer screen for hours.^^Your 
+eyes are losing focus and you blearily try to make out the digits 
+on the spreadsheet.  You don't want to be at this desk, where people seem to 
+regard you as the lowest form of life.  You'd 
+much rather be at home in your garden eating the flowers.  'Eating'...?^^
+You slump forward over your keyboard...^^~~~^^You are seemingly trapped in a walled 
+enclosure, surrounded by grotesque... figures.  That venus fly-trap looks like the number two. 
+Over there is a juicy tuber in the shape of an eight, while several boulders, round like noughts, 
+stare evilly from their whitened faces.  ^^Something else is wrong: you are 
+seeing all this from ground level and you can't seem to stop moving....^^#";
+!size must be >= px*py=704; Now 748
+
+Array wx -> mw;  ! stores previous path of worm
+Array wy -> mw;
+
+[ Banner i; ! print intro and standard Inform header
+   @erase_window -1;
+   i=0; while (cell->i ~= '#') {c=cell->i; if (c=='^') print "^"; else print (char) c; i++;}
+   style bold;
+   print (string) Story;
+   style roman;
+   print (string) Headline;
+   print "Release ", (0-->1) & $03ff, " / Serial ";
+   for (i=18:i<24:i++) print (char) 0->i;
+   print " / Inform v"; inversion;
+#ifdef STRICT_MODE;
+   print "S";
+#endif;
+   print "^^[press a key]";
+];
+
+[ Init; ! after chance to resize screen
+  sx=0->33; sy=0->32; ox=(sx-(px+8))/2+1; oy=(sy-py)/2+1;
+
+  if (0->32 > 50 || 0->32<sy || 0->33<sx        ! no scrolling or screen too small
+      || (0->1 &128 ==0 && (0->1 ~=41 || 0->31 ~='B') ) ) ! no timer and not JZIP
+      "Your interpreter is unable to display this game."; 
+
+  @split_window sy;
+  rfalse;
+  ];
+
+[ keyhook;
+	rtrue;
+];
+
+[ key t r;
+    @set_window 0;  
+    @read_char 1 t keyhook r;
+    if (r==0 && 0->1 == 41) @read_char 1 1 keyhook r;  ! add extra 50ms for JZIP
+! Point of interest here: JZIP's delay is (t-0.5)/10 seconds, WinFrotz is t/10.
+! xzip seems to be (t+0.5)/10
+
+    if (r>96) r=r-32;  ! cursor codes are 129-132 (u,d,l,r)
+    switch(r) {
+       'E', 100:    d=0;
+       'S','K', 98: d=1;
+       'W', 99:     d=2;
+       'Q','O', 97: d=3;
+       'D':      d=(d+3)%4;
+       'L':      d=(d+1)%4;
+       'N', 27, 188, 156:
+             !quit preceded by
+             @split_window 0; @buffer_mode 1; @erase_window -1;
+             print "Your best score was ", champ, ".  Pathetic.^";
+             @quit;
+       }
+
+    @set_window 1;
+    return r;];
+
+[ setcell x y n    t;
+  t=y*px+x; cell->t=n;  ! set internal map
+  x=x+ox; y=y+oy;
+  @set_cursor y x;
+  print (char) n;
+  ];
+
+[ blocked x y;
+  if (cell->(x+y*px)=='0') {return 1;}
+  rfalse;
+  ];
+
+[ forward;
+  setcell(mx, my, '0');
+  wx->wh=mx; wy->wh=my;
+  wh=(wh+1)%mw;
+  if (e>0) e--; else {   ! erase tail
+     setcell(wx->wt, wy->wt, ' ');
+     wt=(wt+1)%mw;}
+  ];
+
+[ plotworm c  i;
+  for (i=wt: i~=wh: i=(i+1)%mw)
+     setcell(wx->i, wy->i, c);
+  ];
+
+[ diefx i;
+  for (i=0: i<=15: i++)
+    {setcell(mx, my, random('$','%','x','*',64,'?','#','/','+','='));
+     key(1+i/10);}
+  plotworm('o'); key(3); plotworm('.');
+  ];
+
+[ winfx j;
+  for (j=1: j<=4: j++)
+    {plotworm(' '); key(4); plotworm ('0'); key(4);}
+  ];
+
+[ points p  x y;
+  score=score+p;
+  x=ox+px+3; y=oy+17;
+  @set_cursor y x;
+  print score;
+  if (score>champ) {
+     champ=score;
+     y=y+3; @set_cursor y x;
+     print champ;}
+  ];
+
+[ NewLevel l  x y i c;
+  @erase_window -1;
+  @set_window 1;
+  @buffer_mode 0;
+
+  x=ox+px+1; y=oy+1;    ! show info to right of play area
+  @set_cursor y x;
+  print "keys:";
+  y++; @set_cursor y x;
+  print "o,Q";
+  y++; @set_cursor y x;
+  print "  @@94";
+  y++; @set_cursor y x;
+  print "W<0>E";
+  y++; @set_cursor y x;
+  print "  v";
+  y++; @set_cursor y x;
+  print "k,S";
+
+  y++; y++; @set_cursor y x;
+  print " or:";
+  y++; @set_cursor y x;
+  print "D<@@94>L";
+  y++; y++; @set_cursor y x;
+  print "N=end";
+
+  y++; y++; @set_cursor y x;
+  print "level";
+  y++; @set_cursor y x;
+  print "  ",level;
+  y++; y++; @set_cursor y x;
+  print "score";
+  y++; @set_cursor y x;
+  print "  ",score;
+  y++; y++; @set_cursor y x;
+  print "champ";
+  y++; @set_cursor y x;
+  print "  ",champ;
+
+  for (i=0: i<704: i++) {cell->i=0;} ! clear obstacles
+  mx=px/2-1; my=py/2; d=0;                 ! starting position
+  setcell(mx,my,64);                 ! show start
+
+  del=2; if (l>10) {del=1; l=l-10;}  ! set delay and difficulty
+
+  ! border
+  for (i=0: i<px: i++) {
+     setcell(i, 0, '0');
+     setcell(i, py-1, '0');
+     if (i<py-1) {
+         setcell(0, i, '0');
+         setcell(px-1, i, '0');}
+     };
+
+  ! obstacles
+  i=l*3+7;
+  while (i>0) {
+    x=random(px)-1; y=random(py)-1;
+    c=cell->(y*px+x);
+    if (c<=' ') {
+               setcell(x, y, '0');
+               i--;}
+    }
+
+  ! edibles:
+  nc=i=l*2+3; style bold;
+  while (i>0) {
+    x=random(px)-1; y=random(py)-1;
+    c=cell->(y*px+x);
+    if (c<=' ') {
+            if (blocked(x+1, y)+blocked(x-1,y)+blocked(x,y+1)+blocked(x,y-1) <3) {
+                setcell(x, y, '0'+random(9));
+                i--;}}
+    }
+  style roman;
+  
+  !set motion
+  e=2; wh=0; wt=0; !array pointers
+  i=10; ! "get ready" timer
+  key(2);
+  while (i>0) {
+    i--; 
+    setcell(mx,my,'0'+i);
+    key(2);
+    }
+  forward();
+  ];
+  
+
+[ Main;
+  Banner();
+  while (1) {
+    if (deadflag) {
+       if (deadflag==1)
+          {key();
+          if (Init()) @quit;
+          level=0; score=0;}
+       NewLevel(++level);
+       deadflag=0;
+       } ! deadflag
+    key(del); ! change d-movement if necessary or quit
+    switch(d) {
+       0: mx++;  1: my++;  2: mx--;  3: my--;}
+    c=cell->(my*px+mx);
+    if (c=='0') {diefx(); deadflag=1;}
+       else {
+         forward(); !plot
+         if (c>'0') {
+            e=e+c-'0'; points(c-'0');
+            if (~~--nc) {winfx(); deadflag=2;}
+            }
+        } ! not hit barrier
+  };  ! while active
+
+];
+
