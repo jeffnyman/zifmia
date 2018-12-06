@@ -8,13 +8,19 @@ If you're wondering about the name of this repo, "zifmia" is one of the [spells]
 
 ---
 
-The `zil_test.z3` file is a version 3 z-code file but one that was compiled via [ZILF](https://bitbucket.org/jmcgrew/zilf/wiki/Home). The source is provided as `zil_test.zil`. The fact that the format is in ZIL is not really important but it seems nice to show that a ZIL based game compiled to z-code would work.
+## General Files
 
 The `dream.blb` file is a compiled version of the game "Just a Dream". The source and resources for this game are located at [Grokking Glk](http://www.iffydoemain.com/grokglk/index.htm). This allows for testing a Blorb archive.
 
 The `glulx_test.ulx` file is a Glulx story file. The source for this is provided in `glulx_test.inf`. This allows for testing a Glulx game. Although right now the test is only that Glulx is not supported.
 
 The `simple_test.inf` file is a very simple test that has been compiled into a `simple_test.z5`, `simple_test.z6`, and `simple_test.z7` files. This file makes no particular use of features to any one Z-Machine so it's really just designed to compile to a few formats to make that Quendor can read in various versions.
+
+## ZIL
+
+The `zil_test.z3` file is a version 3 z-code file but one that was compiled via [ZILF](https://bitbucket.org/jmcgrew/zilf/wiki/Home). The source is provided as `zil_test.zil`. The fact that the format is in ZIL is not really important but it seems nice to show that a ZIL based game compiled to z-code would work.
+
+The `cloak.z3` and `cloak_plus.z5` are files that were compiled with ZILF. Source is provided as `cloak.zil` and `cloak_plus.zil`. These, again, are just attempts to make sure that ZIL games are playable via the emulator. One of the challenges is that how ZIL compiles the Z-Machine files is different than how most other Z-Machine compilers seem to work.
 
 ## Testers
 
@@ -50,7 +56,9 @@ Some of these are what are called "abuses" of the Z-Machine. What that tends to 
 
 *Freefall* (`freefall.z5`, `freefall.inf`) is basically an attempt to code a Tetris clone for the Z-Machine. This was written by Andrew Plotkin.
 
-*SameGame* (`samegame.inf`, `samegame.z5`), is billsed as "another episode in the Z-Machine abuse saga", written by Kevin Bracey. SameGame is an implementation of a simple arcade game and is also stated to be "a stress test of Z-Machine interpreters."
+*SameGame* (`samegame.inf`, `samegame.z5`), is billed as "another episode in the Z-Machine abuse saga", written by Kevin Bracey. SameGame is an implementation of a simple arcade game and is also stated to be "a stress test of Z-Machine interpreters."
+
+*Risorgimento Represso* written by Michael Coyne. This game was chosen because it has a z-code (`risorg.z8`), zblorb (`risorg.zblorb`), and gblorb (`risorg.glborb`) version. I have not distributed the source for the game in my repository but it is available as [risorg_src](http://ifarchive.org/if-archive/games/source/inform/risorg_src.zip).
 
 ## Advent
 
