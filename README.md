@@ -2,7 +2,7 @@
 
 In this repository are a series of programs, some of which are intended to exercise a Z-Machine interpreter to determine if it is functioning according to the specification. These are some programs here that were specifically designed as "testers." Other prorgrams are capable of exercising an interpreter but were not necessarily designed with that purpose in mind. These are the games.
 
-This repository holds a series of story files, mostly in z-code format for testing by my [Quendor](http://github.com/jeffnyman/quendor) interpreter. The idea is that if you are doing development on Quendor, you can clone this repo into the Quendor repo. Quendor is set to ignore the `zifmia` directory.
+This repository holds a series of story files, mostly in z-code format for testing by my [Quendor](http://github.com/jeffnyman/quendor) interpreter. (NOTE: Quendor is not quite up yet.) The idea is that if you are doing development on Quendor, you can clone this repo into the Quendor repo. Quendor is set to ignore the `zifmia` directory.
 
 If you're wondering about the name of this repo, "zifmia" is one of the [spells](http://www.ifwiki.org/index.php/Spells) in the *Zork* / *Enchanter* universe and means "to magically summon a being."
 
