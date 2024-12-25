@@ -233,18 +233,28 @@ Array ZombieList    --> MaxZombies;
 
 	    switch (key) {
 		'Q': player_x--; player_y--;
+		'7': player_x--; player_y--;
 		'W': player_y--;
+		'8': player_y--;
 		'E': player_x++, player_y--;
+		'9': player_x++, player_y--;
 		'A': player_x--;
+		'4': player_x--;
 		'D': player_x++;
+		'6': player_x++;
+		'Y': player_x--; player_y++;
+		'1': player_x--; player_y++;
 		'Z': player_x--; player_y++;
 		'X': player_y++;
+		'2': player_y++;
 		'C': player_x++; player_y++;
+		'3': player_x++; player_y++;
 		'.':
 		    old_score  = score;
 		    wait_bonus = 0;
 		    waiting    = 1;
                 'S':
+                '5':
 		'T':
 		    return AnotherGame();
 		'R':
@@ -619,6 +629,7 @@ Array ZombieList    --> MaxZombies;
       switch (ReadKeyPress()) 
       {
 	'Y': rtrue;
+	'Z': rtrue;
 	'N': rfalse;
       }
     }
