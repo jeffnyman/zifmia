@@ -43,6 +43,7 @@ Constant MaxZombies	300;		! Max number of zombies
 ! Global variables
 
 Global Pit	        = 'O';
+Global Crash	        = 0;
 
 Global score		= 0;		! Current score
 Global high_score	= 0;		! Highest score this session
@@ -140,21 +141,29 @@ Array ZombieList    --> MaxZombies;
     ">WAIT.^At last the tape stops spinning and the word ~Ready.~ appears on
      the screen.^^",
     ">TYPE RUN^
-     The screen displays, ~Do you want (s)hallow or (d)eep pits?~^";
+     The screen displays, ~Do you want (c)rashing zombies, (s)hallow or (d)eep pits?~^";
 
-    ! Waits until either S or D is pressed setting the pit variable
+    ! Waits until either C, S or D is pressed setting the pit and crash variables
     ! accordingly for later reference
     for (::)
     { 
       i = ReadKeyPress();
+      if (i=='C')
+      {
+        Pit = 'O';
+        Crash = 1;
+        break;
+      }
       if (i=='S')
       {
         Pit = 'o';
+        Crash = 0;
         break;
       }
       if (i=='D')
       {
         Pit = 'O';
+        Crash = 0;
         break;
       }
     }
@@ -336,7 +345,7 @@ Array ZombieList    --> MaxZombies;
 
 ! This function moves the zombies and handles zombies falling into pits.
 
-[ MoveZombies i j zombie_x zombie_y hit;
+[ MoveZombies i j zombie_x zombie_y hit collid;
     ! Traverse the list of active zombies. At this point there should be no
     ! 'dead' zombies in the list.
     for (i = 0, hit = 0 : i < active_zombies : i++) {
@@ -386,6 +395,30 @@ Array ZombieList    --> MaxZombies;
 	  DrawObject(zombie_x, zombie_y, Zombie);
 	  PutZombie(zombie_x, zombie_y, i);
         }
+    }
+
+    ! If there are colliding zombies should create a new pit.
+    if (Crash > 0) {
+	for (i = 0 : i < active_zombies - 1 : i++) {
+	    if (ZombieList-->i ~= -1) {
+		zombie_x = ZombieX(i);
+		zombie_y = ZombieY(i);
+		for (j = i + 1, collid = 0 : j < active_zombies : j++) {
+		    if (zombie_x == ZombieX(j) && zombie_y == ZombieY(j)) {
+			ZombieList-->j = -1;
+			UpdateScore(1);
+			hit = 1;
+			collid = 1;
+		    }
+		}
+		if (collid == 1) {
+		    PutPiece(zombie_x, zombie_y, Pit);
+		    DrawObject(zombie_x, zombie_y, Pit);
+		    ZombieList-->i = -1;
+		    UpdateScore(1);
+		}
+	    }
+	}
     }
 
     ! If a zombie was removed, clean up the zombie list.
